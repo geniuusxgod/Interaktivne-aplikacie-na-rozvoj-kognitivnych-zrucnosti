@@ -1,13 +1,19 @@
 <template>
   <div class="nback">
-    <h2>Memory N-Back (MVP)</h2>
+    <h2>Memory N-Back</h2>
 
     <div class="panel">
+      <div><b>Kategória:</b> Pamäť</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>N:</b> {{ levelN }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Stimulus:</b> <span class="stimulus">{{ currentStimulus ?? "—" }}</span></div>
-      <div class="hint">Press <b>Space</b> or click <b>Match</b> when current stimulus matches N-back.</div>
+      <div>
+        <b>Stimulus:</b>
+        <span class="stimulus">{{ currentStimulus ?? "—" }}</span>
+      </div>
+      <div class="hint">
+        Press <b>Space</b> or click <b>Match</b> when current stimulus matches N-back.
+      </div>
     </div>
 
     <div class="controls">
@@ -29,65 +35,55 @@
       </ul>
 
       <details>
-        <summary>Raw responses (debug)</summary>
-        <pre class="pre">{{ responses }}</pre>
+        <summary>Payload (for integration)</summary>
+        <pre class="pre">{{ payload }}</pre>
       </details>
     </div>
   </div>
 </template>
 
-<script setup lang="ts">
-import { onMounted, onBeforeUnmount, reactive, ref, computed } from "vue";
+<script setup>
+import { onMounted, onBeforeUnmount, ref, computed } from "vue";
 
-type Phase = "idle" | "running" | "finished";
+// --- Metadata for your bachelor structure ---
+const MODULE_ID = "memory_nback";
+const CATEGORY = "pamat"; // your category key: pamat | vnimanie | pozornost | logicke_myslenie
 
-type TrialRecord = {
-  trial: number;
-  stimulus: string;
-  n: number;
-  isTarget: boolean;
-  userPressed: boolean;
-  correct: boolean;
-  rtMs: number | null;
-  shownAtMs: number;
-  respondedAtMs: number | null;
-};
+// --- Core state ---
+const phase = ref("idle"); // idle | running | finished
 
-const phase = ref<Phase>("idle");
+const levelN = ref(1);
+const totalTrials = ref(30);
 
-const levelN = ref<number>(1);
-const totalTrials = ref<number>(30);
-
-const stimulusDurationMs = ref<number>(900);
-const isiMs = ref<number>(600);
+const stimulusDurationMs = ref(900);
+const isiMs = ref(600);
 
 const stimulusSet = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
-const trialIndex = ref<number>(0); // 0..totalTrials
-const currentStimulus = ref<string | null>(null);
-const sequence = ref<string[]>([]);
+const trialIndex = ref(0);
+const currentStimulus = ref(null);
+const sequence = ref([]);
 
-const responses = ref<TrialRecord[]>([]);
+const responses = ref([]); // trial records
 
-const currentTrialShownAtMs = ref<number | null>(null);
-const currentTrialResponded = ref<boolean>(false);
-const currentTrialResponseAtMs = ref<number | null>(null);
+const currentTrialShownAtMs = ref(null);
+const currentTrialResponded = ref(false);
+const currentTrialResponseAtMs = ref(null);
 
-let stimTimer: number | null = null;
-let isiTimer: number | null = null;
+let stimTimer = null;
+let isiTimer = null;
 
-function nowMs(): number {
+function nowMs() {
   return performance.now();
 }
 
-function randomStimulus(): string {
+function randomStimulus() {
   const idx = Math.floor(Math.random() * stimulusSet.length);
   return stimulusSet[idx];
 }
 
-function computeIsTarget(stimulus: string, trialNumber1Based: number, n: number): boolean {
-  // trialNumber1Based: 1..totalTrials
-  const idx = trialNumber1Based - 1; // index in sequence
+function computeIsTarget(stimulus, trialNumber1Based, n) {
+  const idx = trialNumber1Based - 1;
   const backIdx = idx - n;
   if (backIdx < 0) return false;
   return sequence.value[backIdx] === stimulus;
@@ -119,8 +115,8 @@ function reset() {
 function stop() {
   if (phase.value !== "running") return;
   clearTimers();
-  // If we stop mid-trial, finalize as finished without forcing correctness.
   phase.value = "finished";
+  currentStimulus.value = null;
 }
 
 function start() {
@@ -129,10 +125,9 @@ function start() {
   nextTrial();
 }
 
-function finalizeTrial(trialNumber1Based: number) {
+function finalizeTrial(trialNumber1Based) {
   const stimulus = currentStimulus.value;
   const shownAt = currentTrialShownAtMs.value;
-
   if (stimulus === null || shownAt === null) return;
 
   const isTarget = computeIsTarget(stimulus, trialNumber1Based, levelN.value);
@@ -159,15 +154,14 @@ function nextTrial() {
   if (phase.value !== "running") return;
 
   if (trialIndex.value >= totalTrials.value) {
-    // finished
     currentStimulus.value = null;
     phase.value = "finished";
     clearTimers();
     return;
   }
 
-  // Start new trial
   trialIndex.value += 1;
+
   const stim = randomStimulus();
   currentStimulus.value = stim;
   sequence.value.push(stim);
@@ -176,7 +170,6 @@ function nextTrial() {
   currentTrialResponded.value = false;
   currentTrialResponseAtMs.value = null;
 
-  // After stimulusDuration -> finalize trial and hide stimulus, then ISI, then next trial
   stimTimer = window.setTimeout(() => {
     finalizeTrial(trialIndex.value);
     currentStimulus.value = null;
@@ -189,7 +182,6 @@ function nextTrial() {
 
 function registerResponse() {
   if (phase.value !== "running") return;
-  // Allow only one response per trial
   if (currentTrialResponded.value) return;
   if (currentTrialShownAtMs.value === null) return;
 
@@ -197,22 +189,20 @@ function registerResponse() {
   currentTrialResponseAtMs.value = nowMs();
 }
 
-function onKeydown(e: KeyboardEvent) {
+function onKeydown(e) {
   if (e.code === "Space") {
     e.preventDefault();
     registerResponse();
   }
 }
 
-onMounted(() => {
-  window.addEventListener("keydown", onKeydown);
-});
-
+onMounted(() => window.addEventListener("keydown", onKeydown));
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   clearTimers();
 });
 
+// --- Summary (metrics) ---
 const summary = computed(() => {
   const recs = responses.value;
   let hits = 0;
@@ -220,7 +210,7 @@ const summary = computed(() => {
   let falseAlarms = 0;
   let correctRejections = 0;
 
-  const rts: number[] = [];
+  const rts = [];
 
   for (const r of recs) {
     if (r.isTarget && r.userPressed) hits++;
@@ -237,6 +227,19 @@ const summary = computed(() => {
   const avgRTms = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
 
   return { hits, misses, falseAlarms, correctRejections, accuracy, avgRTms };
+});
+
+// --- Integration payload (category included) ---
+const payload = computed(() => {
+  return {
+    module: MODULE_ID,
+    category: CATEGORY, // pamat
+    version: "1.0",
+    n: levelN.value,
+    total_trials: responses.value.length,
+    ...summary.value,
+    timestamp_iso: new Date().toISOString(),
+  };
 });
 </script>
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="stroop">
+  <div class="module">
     <h2>Stroop Task</h2>
 
     <div class="panel">
@@ -10,10 +10,7 @@
     </div>
 
     <div class="stimulusBox">
-      <div
-        class="stimulus"
-        :style="{ color: currentStimulus ? currentStimulus.displayColor : '#111' }"
-      >
+      <div class="stimulus" :style="{ color: currentStimulus ? currentStimulus.displayColor : '#111' }">
         {{ currentStimulus ? currentStimulus.word : "—" }}
       </div>
     </div>
@@ -58,24 +55,33 @@
 
 <script setup>
 import { ref, computed, onBeforeUnmount } from "vue";
+import { useGameSession } from "../composables/useGameSession";
+import { useTimeout } from "../composables/useTimeout";
 
 const MODULE_ID = "attention_stroop";
 const CATEGORY = "pozornost";
 
-const phase = ref("idle");
-const trialIndex = ref(0);
-const totalTrials = ref(24);
+const {
+  phase,
+  trialIndex,
+  responses,
+  startSession,
+  stopSession,
+  resetSession,
+  nextTrial,
+  addResponse,
+  buildPayload
+} = useGameSession(MODULE_ID, CATEGORY);
 
+const { setManagedTimeout, clearAllTimeouts } = useTimeout();
+
+const totalTrials = ref(24);
 const stimulusDurationMs = ref(2500);
 const isiMs = ref(500);
 
-const responses = ref([]);
 const currentStimulus = ref(null);
 const currentShownAtMs = ref(null);
 const currentAnswered = ref(false);
-
-let trialTimer = null;
-let isiTimer = null;
 
 const colorOptions = [
   { key: "red", label: "Red" },
@@ -96,37 +102,24 @@ function nowMs() {
   return performance.now();
 }
 
-function clearTimers() {
-  if (trialTimer !== null) {
-    clearTimeout(trialTimer);
-    trialTimer = null;
-  }
-  if (isiTimer !== null) {
-    clearTimeout(isiTimer);
-    isiTimer = null;
-  }
-}
-
 function reset() {
-  clearTimers();
-  phase.value = "idle";
-  trialIndex.value = 0;
-  responses.value = [];
+  clearAllTimeouts();
+  resetSession();
   currentStimulus.value = null;
   currentShownAtMs.value = null;
   currentAnswered.value = false;
 }
 
 function stop() {
-  clearTimers();
-  phase.value = "finished";
+  clearAllTimeouts();
   currentStimulus.value = null;
+  stopSession();
 }
 
 function start() {
   reset();
-  phase.value = "running";
-  nextTrial();
+  startSession();
+  nextStroopTrial();
 }
 
 function randomItem(arr) {
@@ -159,7 +152,7 @@ function finalizeTrial(userAnswer = null) {
   const correct = userAnswer === correctAnswer;
   const rtMs = userAnswer ? Math.max(0, nowMs() - currentShownAtMs.value) : null;
 
-  responses.value.push({
+  addResponse({
     trial: trialIndex.value,
     word: currentStimulus.value.word,
     displayColor: currentStimulus.value.displayColor,
@@ -171,28 +164,27 @@ function finalizeTrial(userAnswer = null) {
   });
 }
 
-function nextTrial() {
+function nextStroopTrial() {
   if (phase.value !== "running") return;
 
   if (trialIndex.value >= totalTrials.value) {
-    phase.value = "finished";
     currentStimulus.value = null;
-    clearTimers();
+    stopSession();
     return;
   }
 
-  trialIndex.value += 1;
+  nextTrial();
   currentStimulus.value = generateStimulus();
   currentShownAtMs.value = nowMs();
   currentAnswered.value = false;
 
-  trialTimer = setTimeout(() => {
+  setManagedTimeout(() => {
     if (!currentAnswered.value) {
       finalizeTrial(null);
       currentStimulus.value = null;
 
-      isiTimer = setTimeout(() => {
-        nextTrial();
+      setManagedTimeout(() => {
+        nextStroopTrial();
       }, isiMs.value);
     }
   }, stimulusDurationMs.value);
@@ -204,17 +196,17 @@ function submitAnswer(answer) {
   if (currentAnswered.value) return;
 
   currentAnswered.value = true;
-  clearTimers();
+  clearAllTimeouts();
   finalizeTrial(answer);
   currentStimulus.value = null;
 
-  isiTimer = setTimeout(() => {
-    nextTrial();
+  setManagedTimeout(() => {
+    nextStroopTrial();
   }, isiMs.value);
 }
 
 onBeforeUnmount(() => {
-  clearTimers();
+  clearAllTimeouts();
 });
 
 const summary = computed(() => {
@@ -243,23 +235,19 @@ const summary = computed(() => {
   };
 });
 
-const payload = computed(() => ({
-  module: MODULE_ID,
-  category: CATEGORY,
-  version: "1.0",
-  total_trials: responses.value.length,
-  settings: {
-    stimulusDurationMs: stimulusDurationMs.value,
-    isiMs: isiMs.value
-  },
-  summary: summary.value,
-  responses: responses.value,
-  timestamp_iso: new Date().toISOString()
-}));
+const payload = computed(() =>
+  buildPayload(summary.value, {
+    settings: {
+      totalTrials: totalTrials.value,
+      stimulusDurationMs: stimulusDurationMs.value,
+      isiMs: isiMs.value
+    }
+  })
+);
 </script>
 
 <style scoped>
-.stroop { max-width: 760px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+.module { max-width: 760px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
 .stimulusBox { border: 1px solid #ddd; border-radius: 12px; padding: 24px; min-height: 120px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
 .stimulus { font-size: 44px; font-weight: 700; letter-spacing: 1px; }

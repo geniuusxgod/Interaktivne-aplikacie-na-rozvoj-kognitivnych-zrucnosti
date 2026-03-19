@@ -1,5 +1,5 @@
 <template>
-  <div class="ds">
+  <div class="module">
     <h2>Digit Span</h2>
 
     <div class="panel">
@@ -7,7 +7,7 @@
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Mode:</b> {{ modeLabel }}</div>
       <div><b>Level (span):</b> {{ spanLength }}</div>
-      <div><b>Round:</b> {{ roundIndex }} / {{ totalRounds }}</div>
+      <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
 
       <div class="stimulusBox" v-if="phase === 'showing'">
         <div class="stimulus">{{ displayDigit }}</div>
@@ -48,9 +48,7 @@
         />
         <button @click="submitAnswer">Submit</button>
       </div>
-      <div class="hint">
-        Tip: you can type without spaces. Backspace works.
-      </div>
+      <div class="hint">Tip: you can type without spaces.</div>
     </div>
 
     <div v-if="lastFeedback" class="feedback" :class="lastFeedback.kind">
@@ -63,11 +61,11 @@
         <li>Max span reached: {{ summary.maxSpanReached }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Correct rounds: {{ summary.correctRounds }} / {{ summary.totalRounds }}</li>
-        <li>Avg answer time: {{ summary.avgAnswerTimeMs === null ? "—" : (summary.avgAnswerTimeMs.toFixed(0) + " ms") }}</li>
+        <li>Avg answer time: {{ summary.avgAnswerTimeMs === null ? "—" : summary.avgAnswerTimeMs.toFixed(0) + " ms" }}</li>
       </ul>
 
       <details>
-        <summary>Payload (for integration)</summary>
+        <summary>Payload</summary>
         <pre class="pre">{{ payload }}</pre>
       </details>
     </div>
@@ -76,75 +74,69 @@
 
 <script setup>
 import { ref, computed, onBeforeUnmount } from "vue";
+import { useGameSession } from "../composables/useGameSession";
+import { useTimeout } from "../composables/useTimeout";
 
-// --- Metadata ---
 const MODULE_ID = "memory_digit_span";
-const CATEGORY = "pamat"; // pamat | vnimanie | pozornost | logicke_myslenie
+const CATEGORY = "pamat";
 
-// --- Phases ---
-// idle -> showing (digits one by one) -> answering -> feedback -> (next round) ... -> finished
-const phase = ref("idle"); // idle | showing | answering | finished
+const {
+  phase,
+  trialIndex,
+  responses,
+  startSession,
+  stopSession,
+  resetSession,
+  nextTrial,
+  addResponse,
+  buildPayload
+} = useGameSession(MODULE_ID, CATEGORY);
 
-// --- Settings ---
-const mode = ref("forward"); // forward | backward
+const { setManagedTimeout, clearAllTimeouts } = useTimeout();
+
+const mode = ref("forward");
 const totalRounds = ref(10);
 
-// Digit presentation timing
 const digitDurationMs = ref(650);
 const gapMs = ref(250);
 
-// --- Round state ---
-const roundIndex = ref(0);
-const spanLength = ref(3); // starts at 3 digits, grows with correct answers
-const currentSequence = ref([]); // array of digits as strings
-const displayDigit = ref(""); // currently displayed digit
+const spanLength = ref(3);
+const currentSequence = ref([]);
+const displayDigit = ref("");
 const answer = ref("");
 
 const shownAtMs = ref(null);
 const answeredAtMs = ref(null);
 
-// responses: each round record
-const responses = ref([]);
-
-// feedback
-const lastFeedback = ref(null); // { kind: "ok"|"bad", text: string }
-
-let showTimer = null;
+const lastFeedback = ref(null);
 
 function nowMs() {
   return performance.now();
 }
 
-function clearTimer() {
-  if (showTimer !== null) {
-    window.clearTimeout(showTimer);
-    showTimer = null;
-  }
-}
-
 function reset() {
-  clearTimer();
-  phase.value = "idle";
-  roundIndex.value = 0;
+  clearAllTimeouts();
+  resetSession();
+
   spanLength.value = 3;
   currentSequence.value = [];
   displayDigit.value = "";
   answer.value = "";
   shownAtMs.value = null;
   answeredAtMs.value = null;
-  responses.value = [];
   lastFeedback.value = null;
 }
 
 function stop() {
-  clearTimer();
-  phase.value = "finished";
+  clearAllTimeouts();
   displayDigit.value = "";
+  stopSession();
 }
 
 function start() {
   reset();
-  nextRound();
+  startSession();
+  nextDigitSpanRound();
 }
 
 function randomDigit() {
@@ -152,22 +144,20 @@ function randomDigit() {
 }
 
 function generateSequence(len) {
-  // allow repeats (common in digit span)
   const seq = [];
   for (let i = 0; i < len; i++) seq.push(randomDigit());
   return seq;
 }
 
 function expectedAnswer(seq) {
-  if (mode.value === "forward") return seq.join("");
-  return [...seq].reverse().join("");
+  return mode.value === "forward" ? seq.join("") : [...seq].reverse().join("");
 }
 
 const modeLabel = computed(() => (mode.value === "forward" ? "Forward" : "Backward"));
 
-function nextRound() {
-  if (roundIndex.value >= totalRounds.value) {
-    phase.value = "finished";
+function nextDigitSpanRound() {
+  if (trialIndex.value >= totalRounds.value) {
+    stopSession();
     return;
   }
 
@@ -175,22 +165,20 @@ function nextRound() {
   answer.value = "";
   displayDigit.value = "";
 
-  roundIndex.value += 1;
+  nextTrial();
   currentSequence.value = generateSequence(spanLength.value);
 
   phase.value = "showing";
   shownAtMs.value = nowMs();
 
-  // show digits one by one
   let i = 0;
-  const showNext = () => {
+
+  function showNext() {
     if (phase.value !== "showing") return;
 
     if (i >= currentSequence.value.length) {
-      // finished showing, go to answering
       displayDigit.value = "";
       phase.value = "answering";
-      // mark "answer start" time from now (not from showing start)
       shownAtMs.value = nowMs();
       return;
     }
@@ -198,11 +186,11 @@ function nextRound() {
     displayDigit.value = currentSequence.value[i];
     i++;
 
-    showTimer = window.setTimeout(() => {
+    setManagedTimeout(() => {
       displayDigit.value = "";
-      showTimer = window.setTimeout(showNext, gapMs.value);
+      setManagedTimeout(showNext, gapMs.value);
     }, digitDurationMs.value);
-  };
+  }
 
   showNext();
 }
@@ -215,11 +203,10 @@ function submitAnswer() {
   const given = (answer.value || "").replace(/\s+/g, "");
   const expected = expectedAnswer(currentSequence.value);
   const correct = given === expected;
-
   const rtMs = shownAtMs.value !== null ? Math.max(0, answeredAtMs.value - shownAtMs.value) : null;
 
-  responses.value.push({
-    round: roundIndex.value,
+  addResponse({
+    round: trialIndex.value,
     mode: mode.value,
     span: spanLength.value,
     sequence: currentSequence.value.join(""),
@@ -234,30 +221,24 @@ function submitAnswer() {
     ? { kind: "ok", text: "Correct ✅" }
     : { kind: "bad", text: `Incorrect ❌ (expected: ${expected})` };
 
-  // adaptive span progression (simple, standard)
-  // correct -> increase span; wrong -> keep or decrease slightly (safe MVP choice: keep)
   if (correct) spanLength.value += 1;
 
-  // short delay then next round
-  phase.value = "showing"; // temporary to prevent double submit
-  clearTimer();
-  showTimer = window.setTimeout(() => {
-    nextRound();
+  phase.value = "showing";
+  setManagedTimeout(() => {
+    nextDigitSpanRound();
   }, 700);
 }
 
 onBeforeUnmount(() => {
-  clearTimer();
+  clearAllTimeouts();
 });
 
-// --- Metrics ---
 const summary = computed(() => {
   const recs = responses.value;
   const total = recs.length;
   const correctRounds = recs.filter(r => r.correct).length;
   const accuracy = total ? (correctRounds / total) * 100 : 0;
 
-  // max span reached = max span where correct
   let maxSpanReached = 0;
   for (const r of recs) {
     if (r.correct) maxSpanReached = Math.max(maxSpanReached, r.span);
@@ -269,28 +250,21 @@ const summary = computed(() => {
   return { totalRounds: total, correctRounds, accuracy, maxSpanReached, avgAnswerTimeMs };
 });
 
-// --- Payload for integration ---
-const payload = computed(() => {
-  return {
-    module: MODULE_ID,
-    category: CATEGORY,
-    version: "1.0",
+const payload = computed(() =>
+  buildPayload(summary.value, {
     mode: mode.value,
     settings: {
       totalRounds: totalRounds.value,
       digitDurationMs: digitDurationMs.value,
       gapMs: gapMs.value,
       startSpan: 3
-    },
-    summary: summary.value,
-    responses: responses.value, // можно потом убрать если нужно меньше данных
-    timestamp_iso: new Date().toISOString()
-  };
-});
+    }
+  })
+);
 </script>
 
 <style scoped>
-.ds { max-width: 720px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+.module { max-width: 720px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; }
 .stimulusBox { margin-top: 10px; padding: 14px; border: 1px dashed #ddd; border-radius: 12px; text-align: center; }
 .stimulus { font-size: 44px; min-height: 56px; display: flex; align-items: center; justify-content: center; }

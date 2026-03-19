@@ -1,5 +1,5 @@
 <template>
-  <div class="nback">
+  <div class="module">
     <h2>Memory N-Back</h2>
 
     <div class="panel">
@@ -7,13 +7,8 @@
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>N:</b> {{ levelN }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div>
-        <b>Stimulus:</b>
-        <span class="stimulus">{{ currentStimulus ?? "—" }}</span>
-      </div>
-      <div class="hint">
-        Press <b>Space</b> or click <b>Match</b> when current stimulus matches N-back.
-      </div>
+      <div><b>Stimulus:</b> <span class="stimulus">{{ currentStimulus ?? "—" }}</span></div>
+      <div class="hint">Press <b>Space</b> or click <b>Match</b> when current stimulus matches N-back.</div>
     </div>
 
     <div class="controls">
@@ -31,11 +26,11 @@
         <li>Misses: {{ summary.misses }}</li>
         <li>False alarms: {{ summary.falseAlarms }}</li>
         <li>Correct rejections: {{ summary.correctRejections }}</li>
-        <li>Avg RT: {{ summary.avgRTms === null ? "—" : (summary.avgRTms.toFixed(0) + " ms") }}</li>
+        <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
       </ul>
 
       <details>
-        <summary>Payload (for integration)</summary>
+        <summary>Payload</summary>
         <pre class="pre">{{ payload }}</pre>
       </details>
     </div>
@@ -43,35 +38,40 @@
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount, ref, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { useGameSession } from "../composables/useGameSession";
+import { useTimeout } from "../composables/useTimeout";
 
-// --- Metadata for your bachelor structure ---
 const MODULE_ID = "memory_nback";
-const CATEGORY = "pamat"; // your category key: pamat | vnimanie | pozornost | logicke_myslenie
+const CATEGORY = "pamat";
 
-// --- Core state ---
-const phase = ref("idle"); // idle | running | finished
+const {
+  phase,
+  trialIndex,
+  responses,
+  startSession,
+  stopSession,
+  resetSession,
+  nextTrial,
+  addResponse,
+  buildPayload
+} = useGameSession(MODULE_ID, CATEGORY);
+
+const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
 const levelN = ref(1);
 const totalTrials = ref(30);
-
 const stimulusDurationMs = ref(900);
 const isiMs = ref(600);
 
 const stimulusSet = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
-const trialIndex = ref(0);
 const currentStimulus = ref(null);
 const sequence = ref([]);
-
-const responses = ref([]); // trial records
 
 const currentTrialShownAtMs = ref(null);
 const currentTrialResponded = ref(false);
 const currentTrialResponseAtMs = ref(null);
-
-let stimTimer = null;
-let isiTimer = null;
 
 function nowMs() {
   return performance.now();
@@ -89,40 +89,27 @@ function computeIsTarget(stimulus, trialNumber1Based, n) {
   return sequence.value[backIdx] === stimulus;
 }
 
-function clearTimers() {
-  if (stimTimer !== null) {
-    window.clearTimeout(stimTimer);
-    stimTimer = null;
-  }
-  if (isiTimer !== null) {
-    window.clearTimeout(isiTimer);
-    isiTimer = null;
-  }
-}
-
 function reset() {
-  clearTimers();
-  phase.value = "idle";
-  trialIndex.value = 0;
+  clearAllTimeouts();
+  resetSession();
+
   currentStimulus.value = null;
   sequence.value = [];
-  responses.value = [];
   currentTrialShownAtMs.value = null;
   currentTrialResponded.value = false;
   currentTrialResponseAtMs.value = null;
 }
 
 function stop() {
-  if (phase.value !== "running") return;
-  clearTimers();
-  phase.value = "finished";
+  clearAllTimeouts();
   currentStimulus.value = null;
+  stopSession();
 }
 
 function start() {
   reset();
-  phase.value = "running";
-  nextTrial();
+  startSession();
+  nextNBackTrial();
 }
 
 function finalizeTrial(trialNumber1Based) {
@@ -137,7 +124,7 @@ function finalizeTrial(trialNumber1Based) {
   const respondedAt = currentTrialResponseAtMs.value;
   const rtMs = userPressed && respondedAt !== null ? Math.max(0, respondedAt - shownAt) : null;
 
-  responses.value.push({
+  addResponse({
     trial: trialNumber1Based,
     stimulus,
     n: levelN.value,
@@ -146,21 +133,20 @@ function finalizeTrial(trialNumber1Based) {
     correct,
     rtMs,
     shownAtMs: shownAt,
-    respondedAtMs: respondedAt,
+    respondedAtMs: respondedAt
   });
 }
 
-function nextTrial() {
+function nextNBackTrial() {
   if (phase.value !== "running") return;
 
   if (trialIndex.value >= totalTrials.value) {
     currentStimulus.value = null;
-    phase.value = "finished";
-    clearTimers();
+    stopSession();
     return;
   }
 
-  trialIndex.value += 1;
+  nextTrial();
 
   const stim = randomStimulus();
   currentStimulus.value = stim;
@@ -170,12 +156,12 @@ function nextTrial() {
   currentTrialResponded.value = false;
   currentTrialResponseAtMs.value = null;
 
-  stimTimer = window.setTimeout(() => {
+  setManagedTimeout(() => {
     finalizeTrial(trialIndex.value);
     currentStimulus.value = null;
 
-    isiTimer = window.setTimeout(() => {
-      nextTrial();
+    setManagedTimeout(() => {
+      nextNBackTrial();
     }, isiMs.value);
   }, stimulusDurationMs.value);
 }
@@ -196,13 +182,15 @@ function onKeydown(e) {
   }
 }
 
-onMounted(() => window.addEventListener("keydown", onKeydown));
-onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onKeydown);
-  clearTimers();
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
 });
 
-// --- Summary (metrics) ---
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+  clearAllTimeouts();
+});
+
 const summary = computed(() => {
   const recs = responses.value;
   let hits = 0;
@@ -223,28 +211,25 @@ const summary = computed(() => {
 
   const correct = recs.filter(r => r.correct).length;
   const accuracy = recs.length ? (correct / recs.length) * 100 : 0;
-
   const avgRTms = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
 
   return { hits, misses, falseAlarms, correctRejections, accuracy, avgRTms };
 });
 
-// --- Integration payload (category included) ---
-const payload = computed(() => {
-  return {
-    module: MODULE_ID,
-    category: CATEGORY, // pamat
-    version: "1.0",
+const payload = computed(() =>
+  buildPayload(summary.value, {
     n: levelN.value,
-    total_trials: responses.value.length,
-    ...summary.value,
-    timestamp_iso: new Date().toISOString(),
-  };
-});
+    settings: {
+      totalTrials: totalTrials.value,
+      stimulusDurationMs: stimulusDurationMs.value,
+      isiMs: isiMs.value
+    }
+  })
+);
 </script>
 
 <style scoped>
-.nback { max-width: 720px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+.module { max-width: 720px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; }
 .stimulus { font-size: 28px; display: inline-block; min-width: 24px; }
 .hint { margin-top: 8px; opacity: 0.8; }

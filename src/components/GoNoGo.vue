@@ -1,5 +1,5 @@
 <template>
-  <div class="gonogo">
+  <div class="module">
     <h2>Go / No-Go Task</h2>
 
     <div class="panel">
@@ -48,14 +48,27 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { useGameSession } from "../composables/useGameSession";
+import { useTimeout } from "../composables/useTimeout";
 
 const MODULE_ID = "attention_go_no_go";
 const CATEGORY = "pozornost";
 
-const phase = ref("idle");
-const trialIndex = ref(0);
-const totalTrials = ref(30);
+const {
+  phase,
+  trialIndex,
+  responses,
+  startSession,
+  stopSession,
+  resetSession,
+  nextTrial,
+  addResponse,
+  buildPayload
+} = useGameSession(MODULE_ID, CATEGORY);
 
+const { setManagedTimeout, clearAllTimeouts } = useTimeout();
+
+const totalTrials = ref(30);
 const stimulusDurationMs = ref(1200);
 const isiMs = ref(500);
 
@@ -64,47 +77,29 @@ const currentShownAtMs = ref(null);
 const currentAnswered = ref(false);
 const currentPressedAtMs = ref(null);
 
-const responses = ref([]);
-
-let trialTimer = null;
-let isiTimer = null;
-
 function nowMs() {
   return performance.now();
 }
 
-function clearTimers() {
-  if (trialTimer !== null) {
-    clearTimeout(trialTimer);
-    trialTimer = null;
-  }
-  if (isiTimer !== null) {
-    clearTimeout(isiTimer);
-    isiTimer = null;
-  }
-}
-
 function reset() {
-  clearTimers();
-  phase.value = "idle";
-  trialIndex.value = 0;
+  clearAllTimeouts();
+  resetSession();
   currentStimulus.value = null;
   currentShownAtMs.value = null;
   currentAnswered.value = false;
   currentPressedAtMs.value = null;
-  responses.value = [];
 }
 
 function stop() {
-  clearTimers();
-  phase.value = "finished";
+  clearAllTimeouts();
   currentStimulus.value = null;
+  stopSession();
 }
 
 function start() {
   reset();
-  phase.value = "running";
-  nextTrial();
+  startSession();
+  nextGoNoGoTrial();
 }
 
 function generateStimulus() {
@@ -134,11 +129,9 @@ function finalizeTrial() {
     ? Math.max(0, currentPressedAtMs.value - currentShownAtMs.value)
     : null;
 
-  const correct =
-    (isGo && userPressed) ||
-    (!isGo && !userPressed);
+  const correct = (isGo && userPressed) || (!isGo && !userPressed);
 
-  responses.value.push({
+  addResponse({
     trial: trialIndex.value,
     stimulusType: currentStimulus.value.type,
     shape: currentStimulus.value.shape,
@@ -149,28 +142,27 @@ function finalizeTrial() {
   });
 }
 
-function nextTrial() {
+function nextGoNoGoTrial() {
   if (phase.value !== "running") return;
 
   if (trialIndex.value >= totalTrials.value) {
-    phase.value = "finished";
     currentStimulus.value = null;
-    clearTimers();
+    stopSession();
     return;
   }
 
-  trialIndex.value += 1;
+  nextTrial();
   currentStimulus.value = generateStimulus();
   currentShownAtMs.value = nowMs();
   currentAnswered.value = false;
   currentPressedAtMs.value = null;
 
-  trialTimer = setTimeout(() => {
+  setManagedTimeout(() => {
     finalizeTrial();
     currentStimulus.value = null;
 
-    isiTimer = setTimeout(() => {
-      nextTrial();
+    setManagedTimeout(() => {
+      nextGoNoGoTrial();
     }, isiMs.value);
   }, stimulusDurationMs.value);
 }
@@ -197,7 +189,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
-  clearTimers();
+  clearAllTimeouts();
 });
 
 const summary = computed(() => {
@@ -228,23 +220,19 @@ const summary = computed(() => {
   };
 });
 
-const payload = computed(() => ({
-  module: MODULE_ID,
-  category: CATEGORY,
-  version: "1.0",
-  total_trials: responses.value.length,
-  settings: {
-    stimulusDurationMs: stimulusDurationMs.value,
-    isiMs: isiMs.value
-  },
-  summary: summary.value,
-  responses: responses.value,
-  timestamp_iso: new Date().toISOString()
-}));
+const payload = computed(() =>
+  buildPayload(summary.value, {
+    settings: {
+      totalTrials: totalTrials.value,
+      stimulusDurationMs: stimulusDurationMs.value,
+      isiMs: isiMs.value
+    }
+  })
+);
 </script>
 
 <style scoped>
-.gonogo { max-width: 760px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+.module { max-width: 760px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
 .stimulusBox { border: 1px solid #ddd; border-radius: 12px; min-height: 180px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
 .shape { width: 100px; height: 100px; }

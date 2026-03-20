@@ -7,6 +7,7 @@
       <button @click="current = 'gonogo'">Go / No-Go</button>
       <button @click="current = 'reaction'">Reaction Time</button>
       <button @click="current = 'visual'">Visual Search</button>
+      <button @click="current = 'pattern'">Pattern Reasoning</button>
     </div>
 
     <MemoryNBack v-if="current === 'nback'" />
@@ -15,6 +16,7 @@
     <GoNoGoTask v-else-if="current === 'gonogo'" />
     <ReactionTime v-else-if="current === 'reaction'" />
     <VisualSearch v-else-if="current === 'visual'" />
+    <PatternReasoning v-else-if="current === 'pattern'" />
   </div>
 </template>
 
@@ -26,6 +28,7 @@ import StroopTask from "./components/Stroop.vue";
 import GoNoGoTask from "./components/GoNoGo.vue";
 import ReactionTime from "./components/ReactionTime.vue";
 import VisualSearch from "./components/VisualSearch.vue";
+import PatternReasoning from "./components/PatternReasoning.vue";
 
 const current = ref("nback");
 </script>

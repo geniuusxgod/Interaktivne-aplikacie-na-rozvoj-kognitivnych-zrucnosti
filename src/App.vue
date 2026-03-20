@@ -6,6 +6,7 @@
       <button @click="current = 'stroop'">Stroop</button>
       <button @click="current = 'gonogo'">Go / No-Go</button>
       <button @click="current = 'reaction'">Reaction Time</button>
+      <button @click="current = 'visual'">Visual Search</button>
     </div>
 
     <MemoryNBack v-if="current === 'nback'" />
@@ -13,6 +14,7 @@
     <StroopTask v-else-if="current === 'stroop'" />
     <GoNoGoTask v-else-if="current === 'gonogo'" />
     <ReactionTime v-else-if="current === 'reaction'" />
+    <VisualSearch v-else-if="current === 'visual'" />
   </div>
 </template>
 
@@ -23,6 +25,7 @@ import DigitSpan from "./components/DigitSpan.vue";
 import StroopTask from "./components/Stroop.vue";
 import GoNoGoTask from "./components/GoNoGo.vue";
 import ReactionTime from "./components/ReactionTime.vue";
+import VisualSearch from "./components/VisualSearch.vue";
 
 const current = ref("nback");
 </script>

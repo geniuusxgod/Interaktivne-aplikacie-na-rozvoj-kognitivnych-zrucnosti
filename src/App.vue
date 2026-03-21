@@ -8,6 +8,8 @@
       <button @click="current = 'reaction'">Reaction Time</button>
       <button @click="current = 'visual'">Visual Search</button>
       <button @click="current = 'pattern'">Pattern Reasoning</button>
+      <button @click="current = 'taskswitch'">Task Switching</button>
+
     </div>
 
     <MemoryNBack v-if="current === 'nback'" />
@@ -17,6 +19,7 @@
     <ReactionTime v-else-if="current === 'reaction'" />
     <VisualSearch v-else-if="current === 'visual'" />
     <PatternReasoning v-else-if="current === 'pattern'" />
+    <TaskSwitching v-else-if="current === 'taskswitch'" />
   </div>
 </template>
 
@@ -29,6 +32,7 @@ import GoNoGoTask from "./components/GoNoGo.vue";
 import ReactionTime from "./components/ReactionTime.vue";
 import VisualSearch from "./components/VisualSearch.vue";
 import PatternReasoning from "./components/PatternReasoning.vue";
+import TaskSwitching from "./components/TaskSwitching.vue";
 
 const current = ref("nback");
 </script>

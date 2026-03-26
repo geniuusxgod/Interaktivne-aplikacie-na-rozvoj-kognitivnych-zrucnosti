@@ -6,6 +6,8 @@
       <div><b>Kategória:</b> Pamäť</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Mode:</b> {{ modeLabel }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Level (span):</b> {{ spanLength }}</div>
       <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
 
@@ -76,6 +78,7 @@
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "memory_digit_span";
 const CATEGORY = "pamat";
@@ -94,13 +97,26 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const mode = ref("forward");
 const totalRounds = ref(10);
 
 const digitDurationMs = ref(650);
 const gapMs = ref(250);
 
-const spanLength = ref(3);
+const spanLength = computed(() => 2 + difficulty.value);
 const currentSequence = ref([]);
 const displayDigit = ref("");
 const answer = ref("");
@@ -117,8 +133,8 @@ function nowMs() {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
 
-  spanLength.value = 3;
   currentSequence.value = [];
   displayDigit.value = "";
   answer.value = "";
@@ -208,6 +224,7 @@ function submitAnswer() {
   addResponse({
     round: trialIndex.value,
     mode: mode.value,
+    difficulty: difficulty.value,
     span: spanLength.value,
     sequence: currentSequence.value.join(""),
     expected,
@@ -218,10 +235,10 @@ function submitAnswer() {
   });
 
   lastFeedback.value = correct
-    ? { kind: "ok", text: "Correct ✅" }
-    : { kind: "bad", text: `Incorrect ❌ (expected: ${expected})` };
+    ? { kind: "ok", text: "Correct" }
+    : { kind: "bad", text: `Incorrect (expected: ${expected})` };
 
-  if (correct) spanLength.value += 1;
+  updateDifficulty(correct);
 
   phase.value = "showing";
   setManagedTimeout(() => {
@@ -253,11 +270,12 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     mode: mode.value,
+    difficulty: difficulty.value,
     settings: {
       totalRounds: totalRounds.value,
       digitDurationMs: digitDurationMs.value,
       gapMs: gapMs.value,
-      startSpan: 3
+      adaptive: true
     }
   })
 );

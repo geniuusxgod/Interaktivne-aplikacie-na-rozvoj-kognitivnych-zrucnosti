@@ -5,8 +5,11 @@
     <div class="panel">
       <div><b>Kategória:</b> Pamäť</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>N:</b> {{ levelN }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
+      <div><b>Block:</b> {{ currentBlockIndex }} / {{ totalBlocks }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Stimulus:</b> <span class="stimulus">{{ currentStimulus ?? "—" }}</span></div>
       <div class="hint">Press <b>Space</b> or click <b>Match</b> when current stimulus matches N-back.</div>
     </div>
@@ -27,6 +30,7 @@
         <li>False alarms: {{ summary.falseAlarms }}</li>
         <li>Correct rejections: {{ summary.correctRejections }}</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ difficulty }}</li>
       </ul>
 
       <details>
@@ -41,6 +45,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "memory_nback";
 const CATEGORY = "pamat";
@@ -59,8 +64,22 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
-const levelN = ref(1);
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 4,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(30);
+const blockSize = ref(5);
+
 const stimulusDurationMs = ref(900);
 const isiMs = ref(600);
 
@@ -72,6 +91,11 @@ const sequence = ref([]);
 const currentTrialShownAtMs = ref(null);
 const currentTrialResponded = ref(false);
 const currentTrialResponseAtMs = ref(null);
+
+const currentBlockIndex = ref(1);
+
+const levelN = computed(() => difficulty.value);
+const totalBlocks = computed(() => Math.ceil(totalTrials.value / blockSize.value));
 
 function nowMs() {
   return performance.now();
@@ -92,12 +116,14 @@ function computeIsTarget(stimulus, trialNumber1Based, n) {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
 
   currentStimulus.value = null;
   sequence.value = [];
   currentTrialShownAtMs.value = null;
   currentTrialResponded.value = false;
   currentTrialResponseAtMs.value = null;
+  currentBlockIndex.value = 1;
 }
 
 function stop() {
@@ -128,6 +154,7 @@ function finalizeTrial(trialNumber1Based) {
     trial: trialNumber1Based,
     stimulus,
     n: levelN.value,
+    difficulty: difficulty.value,
     isTarget,
     userPressed,
     correct,
@@ -135,6 +162,22 @@ function finalizeTrial(trialNumber1Based) {
     shownAtMs: shownAt,
     respondedAtMs: respondedAt
   });
+}
+
+function evaluateCurrentBlock() {
+  const startIndex = responses.value.length - blockSize.value;
+  if (startIndex < 0) return;
+
+  const blockResponses = responses.value.slice(startIndex);
+  if (blockResponses.length === 0) return;
+
+  const correctCount = blockResponses.filter(r => r.correct).length;
+  const accuracy = (correctCount / blockResponses.length) * 100;
+
+  const wasSuccessful = accuracy >= 80;
+  updateDifficulty(wasSuccessful);
+
+  currentBlockIndex.value += 1;
 }
 
 function nextNBackTrial() {
@@ -159,6 +202,11 @@ function nextNBackTrial() {
   setManagedTimeout(() => {
     finalizeTrial(trialIndex.value);
     currentStimulus.value = null;
+
+    const isEndOfBlock = trialIndex.value % blockSize.value === 0;
+    if (isEndOfBlock) {
+      evaluateCurrentBlock();
+    }
 
     setManagedTimeout(() => {
       nextNBackTrial();
@@ -218,11 +266,13 @@ const summary = computed(() => {
 
 const payload = computed(() =>
   buildPayload(summary.value, {
-    n: levelN.value,
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
+      blockSize: blockSize.value,
       stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value
+      isiMs: isiMs.value,
+      adaptive: true
     }
   })
 );

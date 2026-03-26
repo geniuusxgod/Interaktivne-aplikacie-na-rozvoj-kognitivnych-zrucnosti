@@ -5,11 +5,16 @@
     <div class="panel">
       <div><b>Kategória:</b> Vnímanie</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Rule:</b> Click the highlighted cell as quickly as possible.</div>
     </div>
 
-    <div class="grid">
+    <div
+      class="grid"
+      :style="{ gridTemplateColumns: `repeat(${gridSize}, 70px)` }"
+    >
       <button
         v-for="cell in cells"
         :key="cell"
@@ -35,6 +40,7 @@
         <li>Misses: {{ summary.misses }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -49,6 +55,7 @@
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "perception_reaction_time";
 const CATEGORY = "vnimanie";
@@ -67,11 +74,38 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(20);
-const stimulusDurationMs = ref(1500);
 const isiMs = ref(700);
 
-const cells = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+const gridSize = computed(() => {
+  if (difficulty.value <= 2) return 3;
+  if (difficulty.value <= 4) return 4;
+  return 5;
+});
+
+const cells = computed(() => {
+  const total = gridSize.value * gridSize.value;
+  return Array.from({ length: total }, (_, i) => i + 1);
+});
+
+const stimulusDurationMs = computed(() => {
+  const value = 2200 - difficulty.value * 300;
+  return Math.max(700, value);
+});
+
 const activeCell = ref(null);
 
 const shownAtMs = ref(null);
@@ -85,6 +119,7 @@ function nowMs() {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
 
   activeCell.value = null;
   shownAtMs.value = null;
@@ -105,8 +140,8 @@ function start() {
 }
 
 function randomCell() {
-  const index = Math.floor(Math.random() * cells.length);
-  return cells[index];
+  const index = Math.floor(Math.random() * cells.value.length);
+  return cells.value[index];
 }
 
 function finalizeTrial() {
@@ -117,13 +152,19 @@ function finalizeTrial() {
       ? Math.max(0, clickedAtMs.value - shownAtMs.value)
       : null;
 
+  const wasSuccessful = clicked.value;
+
   addResponse({
     trial: trialIndex.value,
     activeCell: activeCell.value,
     clicked: clicked.value,
     correct: clicked.value,
+    difficulty: difficulty.value,
+    gridSize: gridSize.value,
     rtMs
   });
+
+  updateDifficulty(wasSuccessful);
 }
 
 function nextReactionTrial() {
@@ -183,17 +224,20 @@ const summary = computed(() => {
       : 0,
     avgRTms: rts.length
       ? rts.reduce((a, b) => a + b, 0) / rts.length
-      : null
+      : null,
+    finalDifficulty: difficulty.value
   };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: stimulusDurationMs.value,
       isiMs: isiMs.value,
-      gridSize: "3x3"
+      gridSize: `${gridSize.value}x${gridSize.value}`,
+      adaptive: true
     }
   })
 );
@@ -216,19 +260,18 @@ const payload = computed(() =>
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 90px);
   gap: 10px;
   justify-content: center;
   margin: 16px 0;
 }
 
 .cell {
-  width: 90px;
-  height: 90px;
+  width: 70px;
+  height: 70px;
   border-radius: 12px;
   border: 1px solid #ccc;
   background: white;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
 }
 

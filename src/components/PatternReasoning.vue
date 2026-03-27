@@ -5,6 +5,8 @@
     <div class="panel">
       <div><b>Kategória:</b> Logické myslenie</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Rule:</b> Choose the symbol that correctly completes the pattern.</div>
     </div>
@@ -43,6 +45,7 @@
         <li>Incorrect: {{ summary.incorrect }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -57,6 +60,7 @@
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "logic_pattern_reasoning";
 const CATEGORY = "logicke_myslenie";
@@ -75,9 +79,29 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(12);
-const stimulusDurationMs = ref(8000);
-const isiMs = ref(800);
+const isiMs = ref(700);
+
+const stimulusDurationMs = computed(() => {
+  if (difficulty.value === 1) return 7000;
+  if (difficulty.value === 2) return 6000;
+  if (difficulty.value === 3) return 5000;
+  if (difficulty.value === 4) return 4200;
+  return 3500;
+});
 
 const currentPattern = ref([]);
 const currentOptions = ref([]);
@@ -94,6 +118,7 @@ function nowMs() {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
 
   currentPattern.value = [];
   currentOptions.value = [];
@@ -132,8 +157,8 @@ function shuffle(arr) {
   return copy;
 }
 
-function generateRule() {
-  const rules = [
+function getRulesByDifficulty() {
+  const easy = [
     {
       type: "alternating-circles",
       pattern: ["●", "○", "●", "○", "?"],
@@ -145,7 +170,10 @@ function generateRule() {
       pattern: ["■", "□", "■", "□", "?"],
       answer: "■",
       distractors: ["□", "●", "▲"]
-    },
+    }
+  ];
+
+  const medium = [
     {
       type: "triple-repeat",
       pattern: ["▲", "▲", "●", "▲", "▲", "?"],
@@ -157,7 +185,10 @@ function generateRule() {
       pattern: ["●", "●", "○", "●", "●", "?"],
       answer: "○",
       distractors: ["●", "■", "▲"]
-    },
+    }
+  ];
+
+  const hard = [
     {
       type: "pair-alternation",
       pattern: ["■", "■", "●", "●", "■", "■", "?"],
@@ -172,7 +203,13 @@ function generateRule() {
     }
   ];
 
-  return randomItem(rules);
+  if (difficulty.value <= 2) return easy;
+  if (difficulty.value <= 4) return [...easy, ...medium];
+  return [...easy, ...medium, ...hard];
+}
+
+function generateRule() {
+  return randomItem(getRulesByDifficulty());
 }
 
 function buildOptions(correctAnswer, distractors) {
@@ -202,8 +239,11 @@ function finalizeTrial(selectedOption = null) {
     pattern: [...currentPattern.value],
     selected: selectedOption ? selectedOption.value : null,
     correct,
+    difficulty: difficulty.value,
     rtMs
   });
+
+  updateDifficulty(correct);
 }
 
 function nextPatternTrial() {
@@ -284,17 +324,20 @@ const summary = computed(() => {
       : 0,
     avgRTms: rts.length
       ? rts.reduce((a, b) => a + b, 0) / rts.length
-      : null
+      : null,
+    finalDifficulty: difficulty.value
   };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: stimulusDurationMs.value,
       isiMs: isiMs.value,
-      optionCount: 4
+      optionCount: 4,
+      adaptive: true
     }
   })
 );

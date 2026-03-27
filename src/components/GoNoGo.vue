@@ -5,6 +5,8 @@
     <div class="panel">
       <div><b>Kategória:</b> Pozornosť</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Rule:</b> Press only for <u>GO</u> stimulus (green circle). Do not press for <u>NO-GO</u> stimulus (red square).</div>
     </div>
@@ -36,6 +38,7 @@
         <li>False alarms (NO-GO + press): {{ summary.falseAlarms }}</li>
         <li>Correct inhibitions: {{ summary.correctInhibitions }}</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -50,6 +53,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "attention_go_no_go";
 const CATEGORY = "pozornost";
@@ -68,9 +72,37 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(30);
-const stimulusDurationMs = ref(1200);
 const isiMs = ref(500);
+
+const stimulusDurationMs = computed(() => {
+  if (difficulty.value === 1) return 1800;
+  if (difficulty.value === 2) return 1500;
+  if (difficulty.value === 3) return 1200;
+  if (difficulty.value === 4) return 950;
+  return 750;
+});
+
+const noGoProbability = computed(() => {
+  if (difficulty.value === 1) return 0.20;
+  if (difficulty.value === 2) return 0.25;
+  if (difficulty.value === 3) return 0.30;
+  if (difficulty.value === 4) return 0.35;
+  return 0.40;
+});
 
 const currentStimulus = ref(null);
 const currentShownAtMs = ref(null);
@@ -84,6 +116,8 @@ function nowMs() {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
+
   currentStimulus.value = null;
   currentShownAtMs.value = null;
   currentAnswered.value = false;
@@ -103,9 +137,9 @@ function start() {
 }
 
 function generateStimulus() {
-  const isGo = Math.random() < 0.7;
+  const isNoGo = Math.random() < noGoProbability.value;
 
-  if (isGo) {
+  if (!isNoGo) {
     return {
       type: "go",
       shape: "circle",
@@ -138,8 +172,11 @@ function finalizeTrial() {
     color: currentStimulus.value.kind,
     userPressed,
     correct,
+    difficulty: difficulty.value,
     rtMs
   });
+
+  updateDifficulty(correct);
 }
 
 function nextGoNoGoTrial() {
@@ -216,35 +253,113 @@ const summary = computed(() => {
     accuracy: responses.value.length
       ? ((hits + correctInhibitions) / responses.value.length) * 100
       : 0,
-    avgRTms: rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null
+    avgRTms: rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null,
+    finalDifficulty: difficulty.value
   };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value
+      isiMs: isiMs.value,
+      noGoProbability: noGoProbability.value,
+      adaptive: true
     }
   })
 );
 </script>
 
 <style scoped>
-.module { max-width: 760px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-.panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-.stimulusBox { border: 1px solid #ddd; border-radius: 12px; min-height: 180px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
-.shape { width: 100px; height: 100px; }
-.circle { border-radius: 50%; }
-.square { border-radius: 12px; }
-.green { background: #22c55e; }
-.red { background: #ef4444; }
-.placeholder { font-size: 40px; color: #999; }
-.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: white; cursor: pointer; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.hint { opacity: 0.8; margin-bottom: 12px; }
-.results { border-top: 1px solid #eee; padding-top: 12px; margin-top: 12px; }
-.pre { white-space: pre-wrap; font-size: 12px; background: #fafafa; padding: 12px; border-radius: 12px; border: 1px solid #eee; }
+.module {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+.panel {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.stimulusBox {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.shape {
+  width: 100px;
+  height: 100px;
+}
+
+.circle {
+  border-radius: 50%;
+}
+
+.square {
+  border-radius: 12px;
+}
+
+.green {
+  background: #22c55e;
+}
+
+.red {
+  background: #ef4444;
+}
+
+.placeholder {
+  font-size: 40px;
+  color: #999;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+button {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+  background: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hint {
+  opacity: 0.8;
+  margin-bottom: 12px;
+}
+
+.results {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: #fafafa;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+}
 </style>

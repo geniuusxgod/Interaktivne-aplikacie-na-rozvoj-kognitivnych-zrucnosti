@@ -5,16 +5,21 @@
     <div class="panel">
       <div><b>Kategória:</b> Vnímanie</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
+      <div><b>Grid:</b> {{ gridColumns }} x {{ gridRows }}</div>
       <div><b>Rule:</b> Find and click the different symbol as quickly as possible.</div>
     </div>
 
-    <div class="search-area">
+    <div
+      class="search-area"
+      :style="{ gridTemplateColumns: `repeat(${gridColumns}, 70px)` }"
+    >
       <button
         v-for="item in currentItems"
         :key="item.id"
         class="search-item"
-        :class="{ target: false }"
         :disabled="phase !== 'running' || currentItems.length === 0"
         @click="handleItemClick(item)"
       >
@@ -35,6 +40,7 @@
         <li>Misses: {{ summary.misses }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -49,6 +55,7 @@
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "perception_visual_search";
 const CATEGORY = "vnimanie";
@@ -67,10 +74,47 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(16);
-const stimulusDurationMs = ref(4000);
-const isiMs = ref(800);
-const itemCount = ref(16);
+const isiMs = ref(500);
+
+const gridColumns = computed(() => {
+  if (difficulty.value === 1) return 3;
+  if (difficulty.value === 2) return 4;
+  if (difficulty.value === 3) return 4;
+  if (difficulty.value === 4) return 5;
+  return 5;
+});
+
+const gridRows = computed(() => {
+  if (difficulty.value === 1) return 3;
+  if (difficulty.value === 2) return 3;
+  if (difficulty.value === 3) return 4;
+  if (difficulty.value === 4) return 4;
+  return 5;
+});
+
+const itemCount = computed(() => gridColumns.value * gridRows.value);
+
+const stimulusDurationMs = computed(() => {
+  if (difficulty.value === 1) return 2800;
+  if (difficulty.value === 2) return 2400;
+  if (difficulty.value === 3) return 2000;
+  if (difficulty.value === 4) return 1700;
+  return 1400;
+});
 
 const currentItems = ref([]);
 const targetId = ref(null);
@@ -87,6 +131,7 @@ function nowMs() {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
 
   currentItems.value = [];
   targetId.value = null;
@@ -146,13 +191,20 @@ function finalizeTrial() {
       ? Math.max(0, clickedAtMs.value - shownAtMs.value)
       : null;
 
+  const wasSuccessful = clickedCorrect.value;
+
   addResponse({
     trial: trialIndex.value,
     itemCount: itemCount.value,
+    difficulty: difficulty.value,
+    gridColumns: gridColumns.value,
+    gridRows: gridRows.value,
     clicked: clicked.value,
     correct: clickedCorrect.value,
     rtMs
   });
+
+  updateDifficulty(wasSuccessful);
 }
 
 function nextVisualSearchTrial() {
@@ -219,17 +271,21 @@ const summary = computed(() => {
       : 0,
     avgRTms: rts.length
       ? rts.reduce((a, b) => a + b, 0) / rts.length
-      : null
+      : null,
+    finalDifficulty: difficulty.value
   };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: stimulusDurationMs.value,
       isiMs: isiMs.value,
-      itemCount: itemCount.value
+      itemCount: itemCount.value,
+      gridSize: `${gridColumns.value}x${gridRows.value}`,
+      adaptive: true
     }
   })
 );
@@ -252,7 +308,6 @@ const payload = computed(() =>
 
 .search-area {
   display: grid;
-  grid-template-columns: repeat(4, 70px);
   gap: 10px;
   justify-content: center;
   margin: 16px 0;

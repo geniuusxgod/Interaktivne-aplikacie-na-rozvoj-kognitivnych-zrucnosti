@@ -5,6 +5,8 @@
     <div class="panel">
       <div><b>Kategória:</b> Logické myslenie</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Rule:</b></div>
       <div>Blue frame → choose <b>color</b></div>
@@ -54,6 +56,7 @@
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Avg RT (switch): {{ summary.avgSwitchRT === null ? "—" : summary.avgSwitchRT.toFixed(0) + " ms" }}</li>
         <li>Avg RT (repeat): {{ summary.avgRepeatRT === null ? "—" : summary.avgRepeatRT.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -68,6 +71,7 @@
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "logic_task_switching";
 const CATEGORY = "logicke_myslenie";
@@ -86,9 +90,37 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(20);
-const stimulusDurationMs = ref(5000);
-const isiMs = ref(700);
+const isiMs = ref(600);
+
+const stimulusDurationMs = computed(() => {
+  if (difficulty.value === 1) return 4200;
+  if (difficulty.value === 2) return 3600;
+  if (difficulty.value === 3) return 3000;
+  if (difficulty.value === 4) return 2400;
+  return 1800;
+});
+
+const switchProbability = computed(() => {
+  if (difficulty.value === 1) return 0.25;
+  if (difficulty.value === 2) return 0.35;
+  if (difficulty.value === 3) return 0.45;
+  if (difficulty.value === 4) return 0.55;
+  return 0.65;
+});
 
 const currentStimulus = ref(null);
 const currentOptions = ref([]);
@@ -112,6 +144,7 @@ function randomItem(arr) {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
 
   currentStimulus.value = null;
   currentOptions.value = [];
@@ -134,8 +167,21 @@ function start() {
   nextTaskTrial();
 }
 
+function chooseRule() {
+  if (!previousRule.value) {
+    return Math.random() < 0.5 ? "color" : "shape";
+  }
+
+  const shouldSwitch = Math.random() < switchProbability.value;
+  if (shouldSwitch) {
+    return previousRule.value === "color" ? "shape" : "color";
+  }
+
+  return previousRule.value;
+}
+
 function generateStimulus() {
-  const rule = Math.random() < 0.5 ? "color" : "shape";
+  const rule = chooseRule();
   const color = randomItem(colors);
   const shape = randomItem(shapes);
 
@@ -185,10 +231,12 @@ function finalizeTrial(userAnswer = null) {
     correctAnswer: currentStimulus.value.correctAnswer,
     userAnswer,
     correct,
+    difficulty: difficulty.value,
     switchTrial: isSwitchTrial,
     rtMs
   });
 
+  updateDifficulty(correct);
   previousRule.value = currentStimulus.value.rule;
 }
 
@@ -271,17 +319,21 @@ const summary = computed(() => {
     repeatTrials,
     avgRTms: avg(allRTs),
     avgSwitchRT: avg(switchRTs),
-    avgRepeatRT: avg(repeatRTs)
+    avgRepeatRT: avg(repeatRTs),
+    finalDifficulty: difficulty.value
   };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: stimulusDurationMs.value,
       isiMs: isiMs.value,
-      rules: ["color", "shape"]
+      switchProbability: switchProbability.value,
+      rules: ["color", "shape"],
+      adaptive: true
     }
   })
 );

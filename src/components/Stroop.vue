@@ -5,12 +5,17 @@
     <div class="panel">
       <div><b>Kategória:</b> Pozornosť</div>
       <div><b>Status:</b> {{ phase }}</div>
+      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Rule:</b> Select the <u>color of the text</u>, not the word.</div>
     </div>
 
     <div class="stimulusBox">
-      <div class="stimulus" :style="{ color: currentStimulus ? currentStimulus.displayColor : '#111' }">
+      <div
+        class="stimulus"
+        :style="{ color: currentStimulus ? currentStimulus.displayColor : '#111' }"
+      >
         {{ currentStimulus ? currentStimulus.word : "—" }}
       </div>
     </div>
@@ -43,6 +48,7 @@
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Avg RT (congruent): {{ summary.avgCongruentRT === null ? "—" : summary.avgCongruentRT.toFixed(0) + " ms" }}</li>
         <li>Avg RT (incongruent): {{ summary.avgIncongruentRT === null ? "—" : summary.avgIncongruentRT.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -57,6 +63,7 @@
 import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
+import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
 const MODULE_ID = "attention_stroop";
 const CATEGORY = "pozornost";
@@ -75,9 +82,37 @@ const {
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
+const {
+  difficulty,
+  difficultyLabel,
+  successStreak,
+  resetDifficulty,
+  updateDifficulty
+} = useAdaptiveDifficulty({
+  minDifficulty: 1,
+  maxDifficulty: 5,
+  startDifficulty: 1,
+  successThreshold: 2
+});
+
 const totalTrials = ref(24);
-const stimulusDurationMs = ref(2500);
 const isiMs = ref(500);
+
+const stimulusDurationMs = computed(() => {
+  if (difficulty.value === 1) return 2600;
+  if (difficulty.value === 2) return 2200;
+  if (difficulty.value === 3) return 1800;
+  if (difficulty.value === 4) return 1500;
+  return 1200;
+});
+
+const incongruentProbability = computed(() => {
+  if (difficulty.value === 1) return 0.4;
+  if (difficulty.value === 2) return 0.5;
+  if (difficulty.value === 3) return 0.6;
+  if (difficulty.value === 4) return 0.7;
+  return 0.8;
+});
 
 const currentStimulus = ref(null);
 const currentShownAtMs = ref(null);
@@ -105,6 +140,8 @@ function nowMs() {
 function reset() {
   clearAllTimeouts();
   resetSession();
+  resetDifficulty();
+
   currentStimulus.value = null;
   currentShownAtMs.value = null;
   currentAnswered.value = false;
@@ -127,21 +164,25 @@ function randomItem(arr) {
 }
 
 function generateStimulus() {
-  const congruent = Math.random() < 0.5;
+  const incongruent = Math.random() < incongruentProbability.value;
   const word = randomItem(words);
 
   let displayColor;
-  if (congruent) {
+
+  if (!incongruent) {
     displayColor = colorMap[word];
   } else {
-    const otherColors = colorOptions.map(c => c.key).filter(c => c !== colorMap[word]);
+    const otherColors = colorOptions
+      .map(c => c.key)
+      .filter(c => c !== colorMap[word]);
+
     displayColor = randomItem(otherColors);
   }
 
   return {
     word,
     displayColor,
-    congruent
+    congruent: !incongruent
   };
 }
 
@@ -160,8 +201,11 @@ function finalizeTrial(userAnswer = null) {
     userAnswer,
     correctAnswer,
     correct,
+    difficulty: difficulty.value,
     rtMs
   });
+
+  updateDifficulty(correct);
 }
 
 function nextStroopTrial() {
@@ -231,29 +275,90 @@ const summary = computed(() => {
     incongruentCount: incongruent.length,
     avgRTms: avg(rts),
     avgCongruentRT: avg(congruentRTs),
-    avgIncongruentRT: avg(incongruentRTs)
+    avgIncongruentRT: avg(incongruentRTs),
+    finalDifficulty: difficulty.value
   };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
+    difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value
+      isiMs: isiMs.value,
+      incongruentProbability: incongruentProbability.value,
+      adaptive: true
     }
   })
 );
 </script>
 
 <style scoped>
-.module { max-width: 760px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-.panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-.stimulusBox { border: 1px solid #ddd; border-radius: 12px; padding: 24px; min-height: 120px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
-.stimulus { font-size: 44px; font-weight: 700; letter-spacing: 1px; }
-.controls, .answers { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: white; cursor: pointer; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.results { border-top: 1px solid #eee; padding-top: 12px; margin-top: 12px; }
-.pre { white-space: pre-wrap; font-size: 12px; background: #fafafa; padding: 12px; border-radius: 12px; border: 1px solid #eee; }
+.module {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+.panel {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.stimulusBox {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 24px;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.stimulus {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.controls,
+.answers {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+button {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+  background: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.results {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: #fafafa;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+}
 </style>

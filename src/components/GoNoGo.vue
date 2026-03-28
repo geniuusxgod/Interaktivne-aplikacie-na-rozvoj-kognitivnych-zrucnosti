@@ -8,6 +8,9 @@
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
+      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+      <div><b>NO-GO ratio:</b> {{ (levelConfig.noGoProbability * 100).toFixed(0) }}%</div>
       <div><b>Rule:</b> Press only for <u>GO</u> stimulus (green circle). Do not press for <u>NO-GO</u> stimulus (red square).</div>
     </div>
 
@@ -37,6 +40,8 @@
         <li>Misses (GO + no press): {{ summary.misses }}</li>
         <li>False alarms (NO-GO + press): {{ summary.falseAlarms }}</li>
         <li>Correct inhibitions: {{ summary.correctInhibitions }}</li>
+        <li>GO accuracy: {{ summary.goAccuracy.toFixed(1) }}%</li>
+        <li>NO-GO accuracy: {{ summary.noGoAccuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
@@ -80,28 +85,37 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 5,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 420,
+  slowThresholdMs: 1100,
+  targetAccuracyMin: 0.78,
+  targetAccuracyMax: 0.93,
+  windowSize: 8,
+  evaluateEvery: 4,
+  scoreIncreaseThreshold: 82,
+  scoreDecreaseThreshold: 50,
+  maxPendingPenalty: 2
 });
 
-const totalTrials = ref(30);
-const isiMs = ref(500);
+const totalTrials = ref(36);
 
-const stimulusDurationMs = computed(() => {
-  if (difficulty.value === 1) return 1800;
-  if (difficulty.value === 2) return 1500;
-  if (difficulty.value === 3) return 1200;
-  if (difficulty.value === 4) return 950;
-  return 750;
-});
+const difficultySettings = [
+  { stimulusDurationMs: 1800, isiMs: 650, noGoProbability: 0.18 },
+  { stimulusDurationMs: 1600, isiMs: 620, noGoProbability: 0.20 },
+  { stimulusDurationMs: 1450, isiMs: 580, noGoProbability: 0.24 },
+  { stimulusDurationMs: 1300, isiMs: 540, noGoProbability: 0.28 },
+  { stimulusDurationMs: 1150, isiMs: 500, noGoProbability: 0.32 },
+  { stimulusDurationMs: 1000, isiMs: 460, noGoProbability: 0.36 },
+  { stimulusDurationMs: 850, isiMs: 420, noGoProbability: 0.40 },
+  { stimulusDurationMs: 725, isiMs: 380, noGoProbability: 0.44 },
+  { stimulusDurationMs: 625, isiMs: 340, noGoProbability: 0.48 },
+  { stimulusDurationMs: 525, isiMs: 300, noGoProbability: 0.52 }
+];
 
-const noGoProbability = computed(() => {
-  if (difficulty.value === 1) return 0.20;
-  if (difficulty.value === 2) return 0.25;
-  if (difficulty.value === 3) return 0.30;
-  if (difficulty.value === 4) return 0.35;
-  return 0.40;
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
 });
 
 const currentStimulus = ref(null);
@@ -137,7 +151,7 @@ function start() {
 }
 
 function generateStimulus() {
-  const isNoGo = Math.random() < noGoProbability.value;
+  const isNoGo = Math.random() < levelConfig.value.noGoProbability;
 
   if (!isNoGo) {
     return {
@@ -164,6 +178,8 @@ function finalizeTrial() {
     : null;
 
   const correct = (isGo && userPressed) || (!isGo && !userPressed);
+  const falseAlarm = !isGo && userPressed;
+  const lapse = isGo && !userPressed;
 
   addResponse({
     trial: trialIndex.value,
@@ -172,11 +188,22 @@ function finalizeTrial() {
     color: currentStimulus.value.kind,
     userPressed,
     correct,
+    falseAlarm,
+    lapse,
     difficulty: difficulty.value,
+    stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+    isiMs: levelConfig.value.isiMs,
+    noGoProbability: levelConfig.value.noGoProbability,
     rtMs
   });
 
-  updateDifficulty(correct);
+  updateDifficulty({
+    correct,
+    rtMs: isGo ? rtMs : null,
+    falseAlarm,
+    lapse,
+    penalty: falseAlarm ? 0.28 : lapse ? 0.16 : 0
+  });
 }
 
 function nextGoNoGoTrial() {
@@ -200,8 +227,8 @@ function nextGoNoGoTrial() {
 
     setManagedTimeout(() => {
       nextGoNoGoTrial();
-    }, isiMs.value);
-  }, stimulusDurationMs.value);
+    }, levelConfig.value.isiMs);
+  }, levelConfig.value.stimulusDurationMs);
 }
 
 function submitPress() {
@@ -234,15 +261,22 @@ const summary = computed(() => {
   let misses = 0;
   let falseAlarms = 0;
   let correctInhibitions = 0;
+  let goTrials = 0;
+  let noGoTrials = 0;
   const rts = [];
 
   for (const r of responses.value) {
+    if (r.stimulusType === "go") goTrials += 1;
+    if (r.stimulusType === "no-go") noGoTrials += 1;
+
     if (r.stimulusType === "go" && r.userPressed) hits++;
     else if (r.stimulusType === "go" && !r.userPressed) misses++;
     else if (r.stimulusType === "no-go" && r.userPressed) falseAlarms++;
     else if (r.stimulusType === "no-go" && !r.userPressed) correctInhibitions++;
 
-    if (r.rtMs !== null) rts.push(r.rtMs);
+    if (r.stimulusType === "go" && r.rtMs !== null) {
+      rts.push(r.rtMs);
+    }
   }
 
   return {
@@ -253,6 +287,8 @@ const summary = computed(() => {
     accuracy: responses.value.length
       ? ((hits + correctInhibitions) / responses.value.length) * 100
       : 0,
+    goAccuracy: goTrials ? (hits / goTrials) * 100 : 0,
+    noGoAccuracy: noGoTrials ? (correctInhibitions / noGoTrials) * 100 : 0,
     avgRTms: rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null,
     finalDifficulty: difficulty.value
   };
@@ -263,9 +299,9 @@ const payload = computed(() =>
     difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
-      stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value,
-      noGoProbability: noGoProbability.value,
+      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+      isiMs: levelConfig.value.isiMs,
+      noGoProbability: levelConfig.value.noGoProbability,
       adaptive: true
     }
   })
@@ -288,78 +324,76 @@ const payload = computed(() =>
 }
 
 .stimulusBox {
-  border: 1px solid #ddd;
+  height: 260px;
+  border: 1px dashed #ccc;
   border-radius: 12px;
-  min-height: 180px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.shape {
-  width: 100px;
-  height: 100px;
-}
-
-.circle {
-  border-radius: 50%;
-}
-
-.square {
-  border-radius: 12px;
-}
-
-.green {
-  background: #22c55e;
-}
-
-.red {
-  background: #ef4444;
+  display: grid;
+  place-items: center;
+  margin: 16px 0;
+  background: #fafafa;
 }
 
 .placeholder {
-  font-size: 40px;
+  font-size: 48px;
   color: #999;
+}
+
+.shape {
+  width: 120px;
+  height: 120px;
+}
+
+.circle {
+  border-radius: 999px;
+}
+
+.square {
+  border-radius: 18px;
+}
+
+.green {
+  background: #28a745;
+}
+
+.red {
+  background: #dc3545;
 }
 
 .controls {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
 }
 
 button {
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid #ccc;
-  background: white;
   cursor: pointer;
+  background: white;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .hint {
-  opacity: 0.8;
-  margin-bottom: 12px;
+  margin-top: 10px;
+  color: #555;
 }
 
 .results {
+  margin-top: 18px;
   border-top: 1px solid #eee;
   padding-top: 12px;
-  margin-top: 12px;
 }
 
 .pre {
-  white-space: pre-wrap;
-  font-size: 12px;
-  background: #fafafa;
+  background: #0b1020;
+  color: #d8e1ff;
   padding: 12px;
-  border-radius: 12px;
-  border: 1px solid #eee;
+  border-radius: 10px;
+  overflow: auto;
 }
 </style>

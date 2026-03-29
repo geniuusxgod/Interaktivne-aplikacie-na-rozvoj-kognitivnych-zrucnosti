@@ -8,6 +8,9 @@
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
+      <div><b>Grid:</b> {{ gridSize }} x {{ gridSize }}</div>
+      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
       <div><b>Rule:</b> Click the highlighted cell as quickly as possible.</div>
     </div>
 
@@ -20,7 +23,7 @@
         :key="cell"
         class="cell"
         :class="{ active: activeCell === cell }"
-        :disabled="phase !== 'running' || activeCell === null"
+        :disabled="phase !== 'running' || activeCell === null || clicked"
         @click="handleCellClick(cell)"
       >
         {{ cell }}
@@ -31,6 +34,10 @@
       <button :disabled="phase === 'running'" @click="start">Start</button>
       <button :disabled="phase !== 'running'" @click="stop">Stop</button>
       <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
+    </div>
+
+    <div class="hint">
+      Difficulty rises through faster presentation and larger grids.
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -82,28 +89,44 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 5,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 320,
+  slowThresholdMs: 1000,
+  targetAccuracyMin: 0.82,
+  targetAccuracyMax: 0.96,
+  windowSize: 8,
+  evaluateEvery: 4,
+  scoreIncreaseThreshold: 84,
+  scoreDecreaseThreshold: 52,
+  maxPendingPenalty: 2
 });
 
-const totalTrials = ref(20);
-const isiMs = ref(700);
+const totalTrials = ref(22);
 
-const gridSize = computed(() => {
-  if (difficulty.value <= 2) return 3;
-  if (difficulty.value <= 4) return 4;
-  return 5;
+const difficultySettings = [
+  { gridSize: 3, stimulusDurationMs: 2200, isiMs: 700 },
+  { gridSize: 3, stimulusDurationMs: 1900, isiMs: 650 },
+  { gridSize: 4, stimulusDurationMs: 1700, isiMs: 620 },
+  { gridSize: 4, stimulusDurationMs: 1500, isiMs: 580 },
+  { gridSize: 4, stimulusDurationMs: 1300, isiMs: 540 },
+  { gridSize: 5, stimulusDurationMs: 1150, isiMs: 500 },
+  { gridSize: 5, stimulusDurationMs: 1000, isiMs: 460 },
+  { gridSize: 5, stimulusDurationMs: 900, isiMs: 420 },
+  { gridSize: 6, stimulusDurationMs: 800, isiMs: 380 },
+  { gridSize: 6, stimulusDurationMs: 700, isiMs: 340 }
+];
+
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
 });
+
+const gridSize = computed(() => levelConfig.value.gridSize);
 
 const cells = computed(() => {
   const total = gridSize.value * gridSize.value;
   return Array.from({ length: total }, (_, i) => i + 1);
-});
-
-const stimulusDurationMs = computed(() => {
-  const value = 2200 - difficulty.value * 300;
-  return Math.max(700, value);
 });
 
 const activeCell = ref(null);
@@ -152,19 +175,28 @@ function finalizeTrial() {
       ? Math.max(0, clickedAtMs.value - shownAtMs.value)
       : null;
 
-  const wasSuccessful = clicked.value;
+  const correct = clicked.value;
+  const lapse = !clicked.value;
 
   addResponse({
     trial: trialIndex.value,
     activeCell: activeCell.value,
     clicked: clicked.value,
-    correct: clicked.value,
+    correct,
+    lapse,
     difficulty: difficulty.value,
     gridSize: gridSize.value,
+    stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+    isiMs: levelConfig.value.isiMs,
     rtMs
   });
 
-  updateDifficulty(wasSuccessful);
+  updateDifficulty({
+    correct,
+    rtMs,
+    lapse,
+    penalty: lapse ? 0.16 : 0
+  });
 }
 
 function nextReactionTrial() {
@@ -189,8 +221,8 @@ function nextReactionTrial() {
 
     setManagedTimeout(() => {
       nextReactionTrial();
-    }, isiMs.value);
-  }, stimulusDurationMs.value);
+    }, levelConfig.value.isiMs);
+  }, levelConfig.value.stimulusDurationMs);
 }
 
 function handleCellClick(cell) {
@@ -234,8 +266,8 @@ const payload = computed(() =>
     difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
-      stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value,
+      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+      isiMs: levelConfig.value.isiMs,
       gridSize: `${gridSize.value}x${gridSize.value}`,
       adaptive: true
     }
@@ -299,6 +331,11 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.hint {
+  margin-bottom: 12px;
+  color: #555;
 }
 
 .results {

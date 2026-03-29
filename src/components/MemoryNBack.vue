@@ -6,12 +6,16 @@
       <div><b>Kategória:</b> Pamäť</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>N:</b> {{ levelN }}</div>
+      <div><b>N:</b> {{ levelConfig.n }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Block:</b> {{ currentBlockIndex }} / {{ totalBlocks }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
+      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
       <div><b>Stimulus:</b> <span class="stimulus">{{ currentStimulus ?? "—" }}</span></div>
-      <div class="hint">Press <b>Space</b> or click <b>Match</b> when current stimulus matches N-back.</div>
+      <div class="hint">
+        Press <b>Space</b> or click <b>Match</b> when current stimulus matches the one {{ levelConfig.n }} step(s) back.
+      </div>
     </div>
 
     <div class="controls">
@@ -29,8 +33,9 @@
         <li>Misses: {{ summary.misses }}</li>
         <li>False alarms: {{ summary.falseAlarms }}</li>
         <li>Correct rejections: {{ summary.correctRejections }}</li>
+        <li>Target rate: {{ summary.targetRate.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
-        <li>Final difficulty: {{ difficulty }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -72,16 +77,39 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 4,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 450,
+  slowThresholdMs: 1400,
+  targetAccuracyMin: 0.72,
+  targetAccuracyMax: 0.9,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 78,
+  scoreDecreaseThreshold: 48,
+  maxPendingPenalty: 2
 });
 
 const totalTrials = ref(30);
 const blockSize = ref(5);
 
-const stimulusDurationMs = ref(900);
-const isiMs = ref(600);
+const difficultySettings = [
+  { n: 1, stimulusDurationMs: 1200, isiMs: 700 },
+  { n: 1, stimulusDurationMs: 1050, isiMs: 650 },
+  { n: 2, stimulusDurationMs: 1000, isiMs: 620 },
+  { n: 2, stimulusDurationMs: 900, isiMs: 580 },
+  { n: 2, stimulusDurationMs: 820, isiMs: 540 },
+  { n: 3, stimulusDurationMs: 780, isiMs: 500 },
+  { n: 3, stimulusDurationMs: 700, isiMs: 460 },
+  { n: 3, stimulusDurationMs: 640, isiMs: 420 },
+  { n: 4, stimulusDurationMs: 600, isiMs: 380 },
+  { n: 4, stimulusDurationMs: 540, isiMs: 340 }
+];
+
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
+});
 
 const stimulusSet = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
@@ -93,8 +121,6 @@ const currentTrialResponded = ref(false);
 const currentTrialResponseAtMs = ref(null);
 
 const currentBlockIndex = ref(1);
-
-const levelN = computed(() => difficulty.value);
 const totalBlocks = computed(() => Math.ceil(totalTrials.value / blockSize.value));
 
 function nowMs() {
@@ -104,6 +130,23 @@ function nowMs() {
 function randomStimulus() {
   const idx = Math.floor(Math.random() * stimulusSet.length);
   return stimulusSet[idx];
+}
+
+function buildStimulusForTrial(trialNumber1Based) {
+  const index = trialNumber1Based - 1;
+  const n = levelConfig.value.n;
+
+  if (index >= n && Math.random() < 0.35) {
+    return sequence.value[index - n];
+  }
+
+  let candidate = randomStimulus();
+  if (index >= n) {
+    while (candidate === sequence.value[index - n]) {
+      candidate = randomStimulus();
+    }
+  }
+  return candidate;
 }
 
 function computeIsTarget(stimulus, trialNumber1Based, n) {
@@ -141,23 +184,31 @@ function start() {
 function finalizeTrial(trialNumber1Based) {
   const stimulus = currentStimulus.value;
   const shownAt = currentTrialShownAtMs.value;
+
   if (stimulus === null || shownAt === null) return;
 
-  const isTarget = computeIsTarget(stimulus, trialNumber1Based, levelN.value);
+  const isTarget = computeIsTarget(stimulus, trialNumber1Based, levelConfig.value.n);
   const userPressed = currentTrialResponded.value;
   const correct = (isTarget && userPressed) || (!isTarget && !userPressed);
 
+  const falseAlarm = !isTarget && userPressed;
+  const miss = isTarget && !userPressed;
+
   const respondedAt = currentTrialResponseAtMs.value;
-  const rtMs = userPressed && respondedAt !== null ? Math.max(0, respondedAt - shownAt) : null;
+  const rtMs = userPressed && respondedAt !== null
+    ? Math.max(0, respondedAt - shownAt)
+    : null;
 
   addResponse({
     trial: trialNumber1Based,
     stimulus,
-    n: levelN.value,
+    n: levelConfig.value.n,
     difficulty: difficulty.value,
     isTarget,
     userPressed,
     correct,
+    falseAlarm,
+    miss,
     rtMs,
     shownAtMs: shownAt,
     respondedAtMs: respondedAt
@@ -169,13 +220,34 @@ function evaluateCurrentBlock() {
   if (startIndex < 0) return;
 
   const blockResponses = responses.value.slice(startIndex);
-  if (blockResponses.length === 0) return;
+  if (!blockResponses.length) return;
 
   const correctCount = blockResponses.filter(r => r.correct).length;
-  const accuracy = (correctCount / blockResponses.length) * 100;
+  const hits = blockResponses.filter(r => r.isTarget && r.userPressed).length;
+  const misses = blockResponses.filter(r => r.isTarget && !r.userPressed).length;
+  const falseAlarms = blockResponses.filter(r => !r.isTarget && r.userPressed).length;
 
-  const wasSuccessful = accuracy >= 80;
-  updateDifficulty(wasSuccessful);
+  const accuracy = correctCount / blockResponses.length;
+
+  const rts = blockResponses
+    .filter(r => r.userPressed && r.rtMs !== null)
+    .map(r => r.rtMs);
+
+  const avgRTms = rts.length
+    ? rts.reduce((a, b) => a + b, 0) / rts.length
+    : null;
+
+  const penalty =
+    falseAlarms * 0.22 +
+    misses * 0.16;
+
+  updateDifficulty({
+    aggregate: true,
+    accuracy,
+    avgRTms,
+    penalty,
+    sampleCount: blockResponses.length
+  });
 
   currentBlockIndex.value += 1;
 }
@@ -191,7 +263,7 @@ function nextNBackTrial() {
 
   nextTrial();
 
-  const stim = randomStimulus();
+  const stim = buildStimulusForTrial(trialIndex.value);
   currentStimulus.value = stim;
   sequence.value.push(stim);
 
@@ -210,8 +282,8 @@ function nextNBackTrial() {
 
     setManagedTimeout(() => {
       nextNBackTrial();
-    }, isiMs.value);
-  }, stimulusDurationMs.value);
+    }, levelConfig.value.isiMs);
+  }, levelConfig.value.stimulusDurationMs);
 }
 
 function registerResponse() {
@@ -241,18 +313,22 @@ onBeforeUnmount(() => {
 
 const summary = computed(() => {
   const recs = responses.value;
+
   let hits = 0;
   let misses = 0;
   let falseAlarms = 0;
   let correctRejections = 0;
 
   const rts = [];
+  let targetCount = 0;
 
   for (const r of recs) {
-    if (r.isTarget && r.userPressed) hits++;
-    else if (r.isTarget && !r.userPressed) misses++;
-    else if (!r.isTarget && r.userPressed) falseAlarms++;
-    else if (!r.isTarget && !r.userPressed) correctRejections++;
+    if (r.isTarget) targetCount += 1;
+
+    if (r.isTarget && r.userPressed) hits += 1;
+    else if (r.isTarget && !r.userPressed) misses += 1;
+    else if (!r.isTarget && r.userPressed) falseAlarms += 1;
+    else if (!r.isTarget && !r.userPressed) correctRejections += 1;
 
     if (r.rtMs !== null) rts.push(r.rtMs);
   }
@@ -261,7 +337,16 @@ const summary = computed(() => {
   const accuracy = recs.length ? (correct / recs.length) * 100 : 0;
   const avgRTms = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
 
-  return { hits, misses, falseAlarms, correctRejections, accuracy, avgRTms };
+  return {
+    hits,
+    misses,
+    falseAlarms,
+    correctRejections,
+    accuracy,
+    avgRTms,
+    targetRate: recs.length ? (targetCount / recs.length) * 100 : 0,
+    finalDifficulty: difficulty.value
+  };
 });
 
 const payload = computed(() =>
@@ -270,8 +355,9 @@ const payload = computed(() =>
     settings: {
       totalTrials: totalTrials.value,
       blockSize: blockSize.value,
-      stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value,
+      n: levelConfig.value.n,
+      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+      isiMs: levelConfig.value.isiMs,
       adaptive: true
     }
   })
@@ -279,13 +365,63 @@ const payload = computed(() =>
 </script>
 
 <style scoped>
-.module { max-width: 720px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-.panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; }
-.stimulus { font-size: 28px; display: inline-block; min-width: 24px; }
-.hint { margin-top: 8px; opacity: 0.8; }
-.controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
-button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.results { border-top: 1px solid #eee; margin-top: 16px; padding-top: 12px; }
-.pre { white-space: pre-wrap; font-size: 12px; background: #fafafa; padding: 12px; border-radius: 12px; border: 1px solid #eee; }
+.module {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+.panel {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.stimulus {
+  font-size: 28px;
+  display: inline-block;
+  min-width: 24px;
+}
+
+.hint {
+  margin-top: 8px;
+  opacity: 0.8;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+button {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.results {
+  border-top: 1px solid #eee;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: #fafafa;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+}
 </style>

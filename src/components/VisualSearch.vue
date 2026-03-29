@@ -8,19 +8,24 @@
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Grid:</b> {{ gridColumns }} x {{ gridRows }}</div>
+      <div><b>Grid:</b> {{ levelConfig.gridColumns }} x {{ levelConfig.gridRows }}</div>
+      <div><b>Items:</b> {{ itemCount }}</div>
+      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+      <div><b>Target mode:</b> {{ levelConfig.targetMode }}</div>
       <div><b>Rule:</b> Find and click the different symbol as quickly as possible.</div>
     </div>
 
     <div
       class="search-area"
-      :style="{ gridTemplateColumns: `repeat(${gridColumns}, 70px)` }"
+      :style="{ gridTemplateColumns: `repeat(${levelConfig.gridColumns}, 70px)` }"
     >
       <button
         v-for="item in currentItems"
         :key="item.id"
         class="search-item"
-        :disabled="phase !== 'running' || currentItems.length === 0"
+        :class="{ targetClicked: clicked && item.id === clickedItemId }"
+        :disabled="phase !== 'running' || currentItems.length === 0 || clicked"
         @click="handleItemClick(item)"
       >
         {{ item.symbol }}
@@ -33,10 +38,15 @@
       <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
     </div>
 
+    <div class="hint">
+      Higher levels increase grid density and reduce display time.
+    </div>
+
     <div v-if="phase === 'finished'" class="results">
       <h3>Results</h3>
       <ul>
         <li>Hits: {{ summary.hits }}</li>
+        <li>Wrong clicks: {{ summary.wrongClicks }}</li>
         <li>Misses: {{ summary.misses }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
@@ -82,39 +92,40 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 5,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 750,
+  slowThresholdMs: 2600,
+  targetAccuracyMin: 0.76,
+  targetAccuracyMax: 0.92,
+  windowSize: 6,
+  evaluateEvery: 3,
+  scoreIncreaseThreshold: 80,
+  scoreDecreaseThreshold: 50,
+  maxPendingPenalty: 2
 });
 
-const totalTrials = ref(16);
-const isiMs = ref(500);
+const totalTrials = ref(18);
 
-const gridColumns = computed(() => {
-  if (difficulty.value === 1) return 3;
-  if (difficulty.value === 2) return 4;
-  if (difficulty.value === 3) return 4;
-  if (difficulty.value === 4) return 5;
-  return 5;
+const difficultySettings = [
+  { gridColumns: 3, gridRows: 3, stimulusDurationMs: 3200, isiMs: 600, targetMode: "shape" },
+  { gridColumns: 4, gridRows: 3, stimulusDurationMs: 2900, isiMs: 580, targetMode: "shape" },
+  { gridColumns: 4, gridRows: 4, stimulusDurationMs: 2600, isiMs: 560, targetMode: "shape" },
+  { gridColumns: 5, gridRows: 4, stimulusDurationMs: 2350, isiMs: 520, targetMode: "shape" },
+  { gridColumns: 5, gridRows: 5, stimulusDurationMs: 2100, isiMs: 500, targetMode: "shape" },
+  { gridColumns: 5, gridRows: 5, stimulusDurationMs: 1850, isiMs: 470, targetMode: "orientation" },
+  { gridColumns: 6, gridRows: 5, stimulusDurationMs: 1650, isiMs: 440, targetMode: "orientation" },
+  { gridColumns: 6, gridRows: 6, stimulusDurationMs: 1450, isiMs: 410, targetMode: "orientation" },
+  { gridColumns: 7, gridRows: 6, stimulusDurationMs: 1300, isiMs: 380, targetMode: "orientation" },
+  { gridColumns: 7, gridRows: 7, stimulusDurationMs: 1150, isiMs: 340, targetMode: "orientation" }
+];
+
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
 });
 
-const gridRows = computed(() => {
-  if (difficulty.value === 1) return 3;
-  if (difficulty.value === 2) return 3;
-  if (difficulty.value === 3) return 4;
-  if (difficulty.value === 4) return 4;
-  return 5;
-});
-
-const itemCount = computed(() => gridColumns.value * gridRows.value);
-
-const stimulusDurationMs = computed(() => {
-  if (difficulty.value === 1) return 2800;
-  if (difficulty.value === 2) return 2400;
-  if (difficulty.value === 3) return 2000;
-  if (difficulty.value === 4) return 1700;
-  return 1400;
-});
+const itemCount = computed(() => levelConfig.value.gridColumns * levelConfig.value.gridRows);
 
 const currentItems = ref([]);
 const targetId = ref(null);
@@ -123,6 +134,7 @@ const shownAtMs = ref(null);
 const clicked = ref(false);
 const clickedAtMs = ref(null);
 const clickedCorrect = ref(false);
+const clickedItemId = ref(null);
 
 function nowMs() {
   return performance.now();
@@ -139,6 +151,7 @@ function reset() {
   clicked.value = false;
   clickedAtMs.value = null;
   clickedCorrect.value = false;
+  clickedItemId.value = null;
 }
 
 function stop() {
@@ -165,7 +178,7 @@ function shuffle(array) {
   return arr;
 }
 
-function generateItems(count) {
+function generateShapeModeItems(count) {
   const baseSymbol = Math.random() < 0.5 ? "●" : "■";
   const targetSymbol = baseSymbol === "●" ? "■" : "●";
 
@@ -183,6 +196,31 @@ function generateItems(count) {
   return shuffle(items);
 }
 
+function generateOrientationModeItems(count) {
+  const baseSymbol = Math.random() < 0.5 ? "▲" : "▶";
+  const targetSymbol = baseSymbol === "▲" ? "▶" : "▲";
+
+  const targetIndex = Math.floor(Math.random() * count);
+  const items = [];
+
+  for (let i = 0; i < count; i++) {
+    items.push({
+      id: i + 1,
+      symbol: i === targetIndex ? targetSymbol : baseSymbol,
+      isTarget: i === targetIndex
+    });
+  }
+
+  return shuffle(items);
+}
+
+function generateItems(count) {
+  if (levelConfig.value.targetMode === "orientation") {
+    return generateOrientationModeItems(count);
+  }
+  return generateShapeModeItems(count);
+}
+
 function finalizeTrial() {
   if (shownAtMs.value === null) return;
 
@@ -191,20 +229,30 @@ function finalizeTrial() {
       ? Math.max(0, clickedAtMs.value - shownAtMs.value)
       : null;
 
-  const wasSuccessful = clickedCorrect.value;
+  const correct = clickedCorrect.value;
+  const missed = !clicked.value;
+  const wrongClick = clicked.value && !clickedCorrect.value;
 
   addResponse({
     trial: trialIndex.value,
     itemCount: itemCount.value,
     difficulty: difficulty.value,
-    gridColumns: gridColumns.value,
-    gridRows: gridRows.value,
+    gridColumns: levelConfig.value.gridColumns,
+    gridRows: levelConfig.value.gridRows,
+    targetMode: levelConfig.value.targetMode,
     clicked: clicked.value,
-    correct: clickedCorrect.value,
+    correct,
+    missed,
+    wrongClick,
     rtMs
   });
 
-  updateDifficulty(wasSuccessful);
+  updateDifficulty({
+    correct,
+    rtMs: correct ? rtMs : null,
+    lapse: missed,
+    penalty: wrongClick ? 0.24 : missed ? 0.14 : 0
+  });
 }
 
 function nextVisualSearchTrial() {
@@ -229,6 +277,7 @@ function nextVisualSearchTrial() {
   clicked.value = false;
   clickedAtMs.value = null;
   clickedCorrect.value = false;
+  clickedItemId.value = null;
 
   setManagedTimeout(() => {
     finalizeTrial();
@@ -237,8 +286,8 @@ function nextVisualSearchTrial() {
 
     setManagedTimeout(() => {
       nextVisualSearchTrial();
-    }, isiMs.value);
-  }, stimulusDurationMs.value);
+    }, levelConfig.value.isiMs);
+  }, levelConfig.value.stimulusDurationMs);
 }
 
 function handleItemClick(item) {
@@ -249,6 +298,7 @@ function handleItemClick(item) {
   clicked.value = true;
   clickedAtMs.value = nowMs();
   clickedCorrect.value = item.isTarget;
+  clickedItemId.value = item.id;
 }
 
 onBeforeUnmount(() => {
@@ -257,7 +307,8 @@ onBeforeUnmount(() => {
 
 const summary = computed(() => {
   const hits = responses.value.filter(r => r.correct).length;
-  const misses = responses.value.filter(r => !r.correct).length;
+  const wrongClicks = responses.value.filter(r => r.wrongClick).length;
+  const misses = responses.value.filter(r => r.missed).length;
 
   const rts = responses.value
     .filter(r => r.correct && r.rtMs !== null)
@@ -265,6 +316,7 @@ const summary = computed(() => {
 
   return {
     hits,
+    wrongClicks,
     misses,
     accuracy: responses.value.length
       ? (hits / responses.value.length) * 100
@@ -281,10 +333,11 @@ const payload = computed(() =>
     difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
-      stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value,
+      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+      isiMs: levelConfig.value.isiMs,
       itemCount: itemCount.value,
-      gridSize: `${gridColumns.value}x${gridRows.value}`,
+      gridSize: `${levelConfig.value.gridColumns}x${levelConfig.value.gridRows}`,
+      targetMode: levelConfig.value.targetMode,
       adaptive: true
     }
   })
@@ -324,6 +377,11 @@ const payload = computed(() =>
   cursor: pointer;
 }
 
+.targetClicked {
+  border-color: #60a5fa;
+  background: #dbeafe;
+}
+
 .controls {
   display: flex;
   gap: 8px;
@@ -342,6 +400,11 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.hint {
+  margin-bottom: 12px;
+  color: #555;
 }
 
 .results {

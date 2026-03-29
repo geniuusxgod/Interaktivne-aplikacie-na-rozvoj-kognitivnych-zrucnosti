@@ -3,11 +3,14 @@
     <h2>Task Switching</h2>
 
     <div class="panel">
-      <div><b>Kategória:</b> Logické myslenie</div>
+      <div><b>Kategória:</b> Pozornosť</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
+      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+      <div><b>Switch probability:</b> {{ (levelConfig.switchProbability * 100).toFixed(0) }}%</div>
       <div><b>Rule:</b></div>
       <div>Blue frame → choose <b>color</b></div>
       <div>Green frame → choose <b>shape</b></div>
@@ -19,9 +22,11 @@
     >
       <div v-if="currentStimulus" class="stimulus-content">
         <div class="stimulus-shape" :class="[currentStimulus.shape, currentStimulus.color]"></div>
+
         <div class="stimulus-meta">
           <div><b>Rule:</b> {{ currentStimulus.rule === 'color' ? 'Choose color' : 'Choose shape' }}</div>
           <div><b>Stimulus:</b> {{ currentStimulus.color }} {{ currentStimulus.shape }}</div>
+          <div><b>Trial type:</b> {{ currentStimulus.isSwitchTrial ? 'Switch' : 'Repeat' }}</div>
         </div>
       </div>
 
@@ -45,14 +50,21 @@
       <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
     </div>
 
+    <div class="hint">
+      Goal: react quickly and correctly, especially on <b>switch</b> trials when the rule changes.
+    </div>
+
     <div v-if="phase === 'finished'" class="results">
       <h3>Results</h3>
       <ul>
         <li>Correct: {{ summary.correct }}</li>
         <li>Incorrect: {{ summary.incorrect }}</li>
+        <li>Timeouts: {{ summary.timeouts }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Switch trials: {{ summary.switchTrials }}</li>
         <li>Repeat trials: {{ summary.repeatTrials }}</li>
+        <li>Switch accuracy: {{ summary.switchAccuracy.toFixed(1) }}%</li>
+        <li>Repeat accuracy: {{ summary.repeatAccuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Avg RT (switch): {{ summary.avgSwitchRT === null ? "—" : summary.avgSwitchRT.toFixed(0) + " ms" }}</li>
         <li>Avg RT (repeat): {{ summary.avgRepeatRT === null ? "—" : summary.avgRepeatRT.toFixed(0) + " ms" }}</li>
@@ -73,8 +85,8 @@ import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 
-const MODULE_ID = "logic_task_switching";
-const CATEGORY = "logicke_myslenie";
+const MODULE_ID = "attention_task_switching";
+const CATEGORY = "pozornost";
 
 const {
   phase,
@@ -98,29 +110,41 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 5,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 950,
+  slowThresholdMs: 2600,
+  targetAccuracyMin: 0.76,
+  targetAccuracyMax: 0.92,
+  windowSize: 6,
+  evaluateEvery: 3,
+  scoreIncreaseThreshold: 80,
+  scoreDecreaseThreshold: 49,
+  maxPendingPenalty: 2
 });
 
-const totalTrials = ref(20);
-const isiMs = ref(600);
+const totalTrials = ref(24);
 
-const stimulusDurationMs = computed(() => {
-  if (difficulty.value === 1) return 4200;
-  if (difficulty.value === 2) return 3600;
-  if (difficulty.value === 3) return 3000;
-  if (difficulty.value === 4) return 2400;
-  return 1800;
+const difficultySettings = [
+  { stimulusDurationMs: 4200, isiMs: 700, switchProbability: 0.20 },
+  { stimulusDurationMs: 3800, isiMs: 680, switchProbability: 0.24 },
+  { stimulusDurationMs: 3400, isiMs: 640, switchProbability: 0.30 },
+  { stimulusDurationMs: 3100, isiMs: 600, switchProbability: 0.36 },
+  { stimulusDurationMs: 2800, isiMs: 560, switchProbability: 0.42 },
+  { stimulusDurationMs: 2450, isiMs: 520, switchProbability: 0.48 },
+  { stimulusDurationMs: 2150, isiMs: 480, switchProbability: 0.54 },
+  { stimulusDurationMs: 1850, isiMs: 430, switchProbability: 0.60 },
+  { stimulusDurationMs: 1600, isiMs: 380, switchProbability: 0.66 },
+  { stimulusDurationMs: 1350, isiMs: 340, switchProbability: 0.72 }
+];
+
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
 });
 
-const switchProbability = computed(() => {
-  if (difficulty.value === 1) return 0.25;
-  if (difficulty.value === 2) return 0.35;
-  if (difficulty.value === 3) return 0.45;
-  if (difficulty.value === 4) return 0.55;
-  return 0.65;
-});
+const colors = ["red", "blue"];
+const shapes = ["circle", "square"];
 
 const currentStimulus = ref(null);
 const currentOptions = ref([]);
@@ -129,9 +153,6 @@ const previousRule = ref(null);
 const shownAtMs = ref(null);
 const answered = ref(false);
 const answeredAtMs = ref(null);
-
-const colors = ["red", "blue"];
-const shapes = ["circle", "square"];
 
 function nowMs() {
   return performance.now();
@@ -172,7 +193,7 @@ function chooseRule() {
     return Math.random() < 0.5 ? "color" : "shape";
   }
 
-  const shouldSwitch = Math.random() < switchProbability.value;
+  const shouldSwitch = Math.random() < levelConfig.value.switchProbability;
   if (shouldSwitch) {
     return previousRule.value === "color" ? "shape" : "color";
   }
@@ -184,6 +205,10 @@ function generateStimulus() {
   const rule = chooseRule();
   const color = randomItem(colors);
   const shape = randomItem(shapes);
+
+  const isSwitchTrial =
+    previousRule.value !== null &&
+    rule !== previousRule.value;
 
   let correctAnswer;
   let options;
@@ -207,21 +232,24 @@ function generateStimulus() {
     color,
     shape,
     correctAnswer,
-    options
+    options,
+    isSwitchTrial
   };
 }
 
 function finalizeTrial(userAnswer = null) {
   if (!currentStimulus.value || shownAtMs.value === null) return;
 
-  const correct = userAnswer === currentStimulus.value.correctAnswer;
-  const rtMs = userAnswer && answeredAtMs.value !== null
+  const responded = userAnswer !== null;
+  const timedOut = !responded;
+  const correct = responded && userAnswer === currentStimulus.value.correctAnswer;
+  const rtMs = responded && answeredAtMs.value !== null
     ? Math.max(0, answeredAtMs.value - shownAtMs.value)
     : null;
 
-  const isSwitchTrial =
-    previousRule.value !== null &&
-    currentStimulus.value.rule !== previousRule.value;
+  const switchPenalty = currentStimulus.value.isSwitchTrial && !correct ? 0.08 : 0;
+  const timeoutPenalty = timedOut ? 0.18 : 0;
+  const wrongPenalty = responded && !correct ? 0.14 : 0;
 
   addResponse({
     trial: trialIndex.value,
@@ -230,13 +258,24 @@ function finalizeTrial(userAnswer = null) {
     shape: currentStimulus.value.shape,
     correctAnswer: currentStimulus.value.correctAnswer,
     userAnswer,
+    responded,
+    timedOut,
     correct,
     difficulty: difficulty.value,
-    switchTrial: isSwitchTrial,
+    switchTrial: currentStimulus.value.isSwitchTrial,
+    stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+    isiMs: levelConfig.value.isiMs,
+    switchProbability: levelConfig.value.switchProbability,
     rtMs
   });
 
-  updateDifficulty(correct);
+  updateDifficulty({
+    correct,
+    rtMs,
+    lapse: timedOut,
+    penalty: switchPenalty + timeoutPenalty + wrongPenalty
+  });
+
   previousRule.value = currentStimulus.value.rule;
 }
 
@@ -268,9 +307,9 @@ function nextTaskTrial() {
 
       setManagedTimeout(() => {
         nextTaskTrial();
-      }, isiMs.value);
+      }, levelConfig.value.isiMs);
     }
-  }, stimulusDurationMs.value);
+  }, levelConfig.value.stimulusDurationMs);
 }
 
 function submitAnswer(answerKey) {
@@ -289,7 +328,7 @@ function submitAnswer(answerKey) {
 
   setManagedTimeout(() => {
     nextTaskTrial();
-  }, isiMs.value);
+  }, levelConfig.value.isiMs);
 }
 
 onBeforeUnmount(() => {
@@ -298,10 +337,14 @@ onBeforeUnmount(() => {
 
 const summary = computed(() => {
   const correct = responses.value.filter(r => r.correct).length;
-  const incorrect = responses.value.length - correct;
+  const incorrect = responses.value.filter(r => !r.correct && !r.timedOut).length;
+  const timeouts = responses.value.filter(r => r.timedOut).length;
 
   const switchTrials = responses.value.filter(r => r.switchTrial).length;
   const repeatTrials = responses.value.filter(r => !r.switchTrial).length;
+
+  const switchCorrect = responses.value.filter(r => r.switchTrial && r.correct).length;
+  const repeatCorrect = responses.value.filter(r => !r.switchTrial && r.correct).length;
 
   const allRTs = responses.value.map(r => r.rtMs).filter(v => v !== null);
   const switchRTs = responses.value.filter(r => r.switchTrial && r.rtMs !== null).map(r => r.rtMs);
@@ -312,11 +355,14 @@ const summary = computed(() => {
   return {
     correct,
     incorrect,
+    timeouts,
     accuracy: responses.value.length
       ? (correct / responses.value.length) * 100
       : 0,
     switchTrials,
     repeatTrials,
+    switchAccuracy: switchTrials ? (switchCorrect / switchTrials) * 100 : 0,
+    repeatAccuracy: repeatTrials ? (repeatCorrect / repeatTrials) * 100 : 0,
     avgRTms: avg(allRTs),
     avgSwitchRT: avg(switchRTs),
     avgRepeatRT: avg(repeatRTs),
@@ -329,9 +375,9 @@ const payload = computed(() =>
     difficulty: difficulty.value,
     settings: {
       totalTrials: totalTrials.value,
-      stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value,
-      switchProbability: switchProbability.value,
+      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
+      isiMs: levelConfig.value.isiMs,
+      switchProbability: levelConfig.value.switchProbability,
       rules: ["color", "shape"],
       adaptive: true
     }
@@ -438,6 +484,11 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.hint {
+  margin-bottom: 12px;
+  color: #555;
 }
 
 .results {

@@ -8,7 +8,9 @@
       <div><b>Mode:</b> {{ modeLabel }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
-      <div><b>Level (span):</b> {{ spanLength }}</div>
+      <div><b>Span length:</b> {{ levelConfig.spanLength }}</div>
+      <div><b>Digit duration:</b> {{ levelConfig.digitDurationMs }} ms</div>
+      <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
       <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
 
       <div class="stimulusBox" v-if="phase === 'showing'">
@@ -50,7 +52,7 @@
         />
         <button @click="submitAnswer">Submit</button>
       </div>
-      <div class="hint">Tip: you can type without spaces.</div>
+      <div class="hint">Tip: write digits without spaces.</div>
     </div>
 
     <div v-if="lastFeedback" class="feedback" :class="lastFeedback.kind">
@@ -64,6 +66,7 @@
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Correct rounds: {{ summary.correctRounds }} / {{ summary.totalRounds }}</li>
         <li>Avg answer time: {{ summary.avgAnswerTimeMs === null ? "—" : summary.avgAnswerTimeMs.toFixed(0) + " ms" }}</li>
+        <li>Final difficulty: {{ summary.finalDifficulty }}</li>
       </ul>
 
       <details>
@@ -105,23 +108,45 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 5,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 2200,
+  slowThresholdMs: 9000,
+  targetAccuracyMin: 0.72,
+  targetAccuracyMax: 0.92,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 78,
+  scoreDecreaseThreshold: 48,
+  maxPendingPenalty: 2
 });
 
 const mode = ref("forward");
 const totalRounds = ref(10);
 
-const digitDurationMs = ref(650);
-const gapMs = ref(250);
+const difficultySettings = [
+  { spanLength: 3, digitDurationMs: 900, gapMs: 350 },
+  { spanLength: 4, digitDurationMs: 850, gapMs: 320 },
+  { spanLength: 4, digitDurationMs: 760, gapMs: 300 },
+  { spanLength: 5, digitDurationMs: 720, gapMs: 280 },
+  { spanLength: 5, digitDurationMs: 650, gapMs: 260 },
+  { spanLength: 6, digitDurationMs: 620, gapMs: 240 },
+  { spanLength: 6, digitDurationMs: 560, gapMs: 220 },
+  { spanLength: 7, digitDurationMs: 520, gapMs: 200 },
+  { spanLength: 7, digitDurationMs: 470, gapMs: 180 },
+  { spanLength: 8, digitDurationMs: 430, gapMs: 160 }
+];
 
-const spanLength = computed(() => 2 + difficulty.value);
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
+});
+
 const currentSequence = ref([]);
 const displayDigit = ref("");
 const answer = ref("");
 
-const shownAtMs = ref(null);
+const answerShownAtMs = ref(null);
 const answeredAtMs = ref(null);
 
 const lastFeedback = ref(null);
@@ -138,7 +163,7 @@ function reset() {
   currentSequence.value = [];
   displayDigit.value = "";
   answer.value = "";
-  shownAtMs.value = null;
+  answerShownAtMs.value = null;
   answeredAtMs.value = null;
   lastFeedback.value = null;
 }
@@ -161,12 +186,16 @@ function randomDigit() {
 
 function generateSequence(len) {
   const seq = [];
-  for (let i = 0; i < len; i++) seq.push(randomDigit());
+  for (let i = 0; i < len; i++) {
+    seq.push(randomDigit());
+  }
   return seq;
 }
 
 function expectedAnswer(seq) {
-  return mode.value === "forward" ? seq.join("") : [...seq].reverse().join("");
+  return mode.value === "forward"
+    ? seq.join("")
+    : [...seq].reverse().join("");
 }
 
 const modeLabel = computed(() => (mode.value === "forward" ? "Forward" : "Backward"));
@@ -182,10 +211,9 @@ function nextDigitSpanRound() {
   displayDigit.value = "";
 
   nextTrial();
-  currentSequence.value = generateSequence(spanLength.value);
+  currentSequence.value = generateSequence(levelConfig.value.spanLength);
 
   phase.value = "showing";
-  shownAtMs.value = nowMs();
 
   let i = 0;
 
@@ -195,17 +223,17 @@ function nextDigitSpanRound() {
     if (i >= currentSequence.value.length) {
       displayDigit.value = "";
       phase.value = "answering";
-      shownAtMs.value = nowMs();
+      answerShownAtMs.value = nowMs();
       return;
     }
 
     displayDigit.value = currentSequence.value[i];
-    i++;
+    i += 1;
 
     setManagedTimeout(() => {
       displayDigit.value = "";
-      setManagedTimeout(showNext, gapMs.value);
-    }, digitDurationMs.value);
+      setManagedTimeout(showNext, levelConfig.value.gapMs);
+    }, levelConfig.value.digitDurationMs);
   }
 
   showNext();
@@ -218,18 +246,32 @@ function submitAnswer() {
 
   const given = (answer.value || "").replace(/\s+/g, "");
   const expected = expectedAnswer(currentSequence.value);
+
   const correct = given === expected;
-  const rtMs = shownAtMs.value !== null ? Math.max(0, answeredAtMs.value - shownAtMs.value) : null;
+  const rtMs = answerShownAtMs.value !== null
+    ? Math.max(0, answeredAtMs.value - answerShownAtMs.value)
+    : null;
+
+  const charsCorrect = given.length === expected.length
+    ? [...given].filter((digit, idx) => digit === expected[idx]).length
+    : [...given].filter((digit, idx) => digit === expected[idx]).length;
+
+  const partialAccuracy = expected.length
+    ? charsCorrect / expected.length
+    : 0;
 
   addResponse({
     round: trialIndex.value,
     mode: mode.value,
     difficulty: difficulty.value,
-    span: spanLength.value,
+    span: levelConfig.value.spanLength,
+    digitDurationMs: levelConfig.value.digitDurationMs,
+    gapMs: levelConfig.value.gapMs,
     sequence: currentSequence.value.join(""),
     expected,
     given,
     correct,
+    partialAccuracy,
     answerTimeMs: rtMs,
     timestampMs: Date.now()
   });
@@ -238,7 +280,13 @@ function submitAnswer() {
     ? { kind: "ok", text: "Correct" }
     : { kind: "bad", text: `Incorrect (expected: ${expected})` };
 
-  updateDifficulty(correct);
+  updateDifficulty({
+    aggregate: true,
+    accuracy: correct ? 1 : partialAccuracy,
+    avgRTms: rtMs,
+    penalty: correct ? 0 : 0.14,
+    sampleCount: 1
+  });
 
   phase.value = "showing";
   setManagedTimeout(() => {
@@ -258,23 +306,38 @@ const summary = computed(() => {
 
   let maxSpanReached = 0;
   for (const r of recs) {
-    if (r.correct) maxSpanReached = Math.max(maxSpanReached, r.span);
+    if (r.correct && r.span > maxSpanReached) {
+      maxSpanReached = r.span;
+    }
   }
 
-  const times = recs.map(r => r.answerTimeMs).filter(t => typeof t === "number");
-  const avgAnswerTimeMs = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
+  const answerTimes = recs
+    .map(r => r.answerTimeMs)
+    .filter(v => v !== null && v !== undefined);
 
-  return { totalRounds: total, correctRounds, accuracy, maxSpanReached, avgAnswerTimeMs };
+  const avgAnswerTimeMs = answerTimes.length
+    ? answerTimes.reduce((a, b) => a + b, 0) / answerTimes.length
+    : null;
+
+  return {
+    maxSpanReached,
+    accuracy,
+    correctRounds,
+    totalRounds: total,
+    avgAnswerTimeMs,
+    finalDifficulty: difficulty.value
+  };
 });
 
 const payload = computed(() =>
   buildPayload(summary.value, {
-    mode: mode.value,
     difficulty: difficulty.value,
     settings: {
       totalRounds: totalRounds.value,
-      digitDurationMs: digitDurationMs.value,
-      gapMs: gapMs.value,
+      mode: mode.value,
+      spanLength: levelConfig.value.spanLength,
+      digitDurationMs: levelConfig.value.digitDurationMs,
+      gapMs: levelConfig.value.gapMs,
       adaptive: true
     }
   })
@@ -282,22 +345,114 @@ const payload = computed(() =>
 </script>
 
 <style scoped>
-.module { max-width: 720px; margin: 0 auto; padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-.panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin: 12px 0; }
-.stimulusBox { margin-top: 10px; padding: 14px; border: 1px dashed #ddd; border-radius: 12px; text-align: center; }
-.stimulus { font-size: 44px; min-height: 56px; display: flex; align-items: center; justify-content: center; }
-.subhint { opacity: 0.75; margin-top: 6px; }
-.controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
-.select { display: inline-flex; gap: 6px; align-items: center; }
-.answer { border: 1px solid #eee; border-radius: 12px; padding: 12px; }
-.answerRow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.input { padding: 8px 10px; border-radius: 10px; border: 1px solid #ccc; min-width: 220px; }
-button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.hint { margin-top: 8px; opacity: 0.8; }
-.feedback { margin-top: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid #eee; }
-.feedback.ok { background: #f0fdf4; }
-.feedback.bad { background: #fef2f2; }
-.results { border-top: 1px solid #eee; margin-top: 16px; padding-top: 12px; }
-.pre { white-space: pre-wrap; font-size: 12px; background: #fafafa; padding: 12px; border-radius: 12px; border: 1px solid #eee; }
+.module {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+.panel {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.stimulusBox {
+  margin-top: 12px;
+  border: 1px dashed #ccc;
+  border-radius: 12px;
+  min-height: 130px;
+  display: grid;
+  place-items: center;
+  background: #fafafa;
+}
+
+.stimulus {
+  font-size: 42px;
+  font-weight: 700;
+}
+
+.subhint {
+  color: #666;
+  margin-top: 6px;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.select {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.answer {
+  margin: 14px 0;
+}
+
+.answerRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.input {
+  min-width: 260px;
+  padding: 10px 12px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+}
+
+button,
+select {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+  background: white;
+}
+
+.feedback {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.feedback.ok {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.feedback.bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.hint {
+  color: #666;
+  margin-top: 6px;
+}
+
+.results {
+  margin-top: 18px;
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+}
+
+.pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: #fafafa;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+}
 </style>

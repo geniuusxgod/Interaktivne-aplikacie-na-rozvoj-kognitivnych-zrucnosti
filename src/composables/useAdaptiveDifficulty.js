@@ -17,16 +17,16 @@ function stdDev(values) {
 }
 
 function normalizeSpeed(avgRTms, fastThresholdMs, slowThresholdMs) {
-  if (avgRTms === null || avgRTms === undefined) return 0.35;
+  if (avgRTms === null || avgRTms === undefined) return 0.45;
   if (avgRTms <= fastThresholdMs) return 1;
   if (avgRTms >= slowThresholdMs) return 0;
-  return 1 - (avgRTms - fastThresholdMs) / (slowThresholdMs - fastThresholdMs);
+  return 1 - (avgRTms - fastThresholdMs) / Math.max(1, slowThresholdMs - fastThresholdMs);
 }
 
 function normalizeConsistency(rtValues, slowThresholdMs) {
   if (rtValues.length <= 1) return 1;
   const deviation = stdDev(rtValues);
-  return clamp(1 - deviation / Math.max(1, slowThresholdMs * 0.35), 0, 1);
+  return clamp(1 - deviation / Math.max(1, slowThresholdMs * 0.28), 0, 1);
 }
 
 function buildLabel(level) {
@@ -40,16 +40,23 @@ function buildLabel(level) {
 export function useAdaptiveDifficulty(options = {}) {
   const minDifficulty = options.minDifficulty ?? 1;
   const maxDifficulty = options.maxDifficulty ?? 10;
-  const startDifficulty = options.startDifficulty ?? minDifficulty;
-  const fastThresholdMs = options.fastThresholdMs ?? 700;
-  const slowThresholdMs = options.slowThresholdMs ?? 2200;
-  const targetAccuracyMin = options.targetAccuracyMin ?? 0.75;
-  const targetAccuracyMax = options.targetAccuracyMax ?? 0.9;
-  const windowSize = options.windowSize ?? 5;
-  const evaluateEvery = options.evaluateEvery ?? windowSize;
-  const scoreIncreaseThreshold = options.scoreIncreaseThreshold ?? 78;
-  const scoreDecreaseThreshold = options.scoreDecreaseThreshold ?? 48;
+  const startDifficulty = options.startDifficulty ?? Math.min(3, maxDifficulty);
+
+  const fastThresholdMs = options.fastThresholdMs ?? 650;
+  const slowThresholdMs = options.slowThresholdMs ?? 2000;
+
+  const targetAccuracyMin = options.targetAccuracyMin ?? 0.7;
+  const targetAccuracyMax = options.targetAccuracyMax ?? 0.85;
+
+  const windowSize = options.windowSize ?? 4;
+  const evaluateEvery = options.evaluateEvery ?? 2;
+
+  const scoreIncreaseThreshold = options.scoreIncreaseThreshold ?? 72;
+  const scoreDecreaseThreshold = options.scoreDecreaseThreshold ?? 42;
+
   const maxPendingPenalty = options.maxPendingPenalty ?? 2;
+
+  const showDebug = ref(options.showDebug ?? false);
 
   const difficulty = ref(startDifficulty);
   const successStreak = ref(0);
@@ -57,6 +64,7 @@ export function useAdaptiveDifficulty(options = {}) {
   const pendingSinceEvaluation = ref(0);
   const adaptationHistory = ref([]);
   const lastDecision = ref("steady");
+
   const performanceSnapshot = ref({
     accuracy: 0,
     avgRTms: null,
@@ -142,47 +150,74 @@ export function useAdaptiveDifficulty(options = {}) {
       const rate = sample.correctRate ?? (sample.correct ? 1 : 0);
       return sum + rate * sample.weight;
     }, 0);
+
     const accuracy = weightedTotal ? weightedCorrect / weightedTotal : 0;
 
     const rtValues = recentSamples.value
       .map(sample => sample.rtMs)
       .filter(value => value !== null && value !== undefined);
+
     const avgRTms = average(rtValues);
     const speedScore = normalizeSpeed(avgRTms, fastThresholdMs, slowThresholdMs);
 
     const providedConsistency = recentSamples.value
       .map(sample => sample.consistency)
       .filter(value => value !== null && value !== undefined);
+
     const consistency = providedConsistency.length
       ? average(providedConsistency)
       : normalizeConsistency(rtValues, slowThresholdMs);
 
-    const penalty = recentSamples.value.reduce((sum, sample) => sum + (sample.penalty ?? 0), 0) / recentSamples.value.length;
+    const penalty =
+      recentSamples.value.reduce((sum, sample) => sum + (sample.penalty ?? 0), 0) /
+      recentSamples.value.length;
 
     const performanceScore = clamp(
-      accuracy * 60 + speedScore * 25 + consistency * 15 - penalty * 20,
+      accuracy * 60 + speedScore * 28 + consistency * 12 - penalty * 20,
       0,
       100
     );
 
     let nextDecision = "steady";
-    if (accuracy >= targetAccuracyMax && performanceScore >= scoreIncreaseThreshold) {
-      nextDecision = "up";
-    } else if (accuracy < targetAccuracyMin || performanceScore <= scoreDecreaseThreshold) {
-      nextDecision = "down";
-    }
 
-    if (nextDecision === "up") {
-      difficulty.value = Math.min(maxDifficulty, difficulty.value + 1);
+    const isExcellent =
+      accuracy >= 0.95 &&
+      performanceScore >= 88 &&
+      difficulty.value < maxDifficulty;
+
+    const isVeryPoor =
+      accuracy <= 0.45 &&
+      performanceScore <= 35 &&
+      difficulty.value > minDifficulty;
+
+    if (isExcellent) {
+      difficulty.value = Math.min(maxDifficulty, difficulty.value + 2);
+      nextDecision = "up";
       successStreak.value += 1;
-    } else if (nextDecision === "down") {
-      difficulty.value = Math.max(minDifficulty, difficulty.value - 1);
+    } else if (isVeryPoor) {
+      difficulty.value = Math.max(minDifficulty, difficulty.value - 2);
+      nextDecision = "down";
       successStreak.value = 0;
     } else {
-      successStreak.value = 0;
+      if (accuracy >= targetAccuracyMax && performanceScore >= scoreIncreaseThreshold) {
+        nextDecision = "up";
+      } else if (accuracy < targetAccuracyMin || performanceScore <= scoreDecreaseThreshold) {
+        nextDecision = "down";
+      }
+
+      if (nextDecision === "up") {
+        difficulty.value = Math.min(maxDifficulty, difficulty.value + 1);
+        successStreak.value += 1;
+      } else if (nextDecision === "down") {
+        difficulty.value = Math.max(minDifficulty, difficulty.value - 1);
+        successStreak.value = 0;
+      } else {
+        successStreak.value = 0;
+      }
     }
 
     lastDecision.value = nextDecision;
+
     performanceSnapshot.value = {
       accuracy,
       avgRTms,
@@ -215,7 +250,9 @@ export function useAdaptiveDifficulty(options = {}) {
     pushSample(sample);
 
     const hasEnoughSamples = recentSamples.value.length >= Math.min(windowSize, 2);
-    const shouldEvaluate = sample.forceEvaluate || (hasEnoughSamples && pendingSinceEvaluation.value >= evaluateEvery);
+    const shouldEvaluate =
+      sample.forceEvaluate ||
+      (hasEnoughSamples && pendingSinceEvaluation.value >= evaluateEvery);
 
     if (shouldEvaluate) {
       evaluateWindow();
@@ -231,6 +268,7 @@ export function useAdaptiveDifficulty(options = {}) {
     performanceSnapshot,
     adaptationHistory,
     lastDecision,
+    showDebug,
     resetDifficulty,
     updateDifficulty
   };

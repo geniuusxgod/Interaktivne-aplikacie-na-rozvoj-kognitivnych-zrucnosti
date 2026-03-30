@@ -3,7 +3,7 @@
     <h2>Stroop Task</h2>
 
     <div class="panel">
-      <div><b>Kategória:</b> Logické myslenie</div>
+      <div><b>Kategória:</b> Pozornosť</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>

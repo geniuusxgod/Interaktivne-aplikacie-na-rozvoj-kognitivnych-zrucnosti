@@ -7,26 +7,34 @@
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Success streak:</b> {{ successStreak }}</div>
-      <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Rule:</b> Choose the symbol that correctly completes the pattern.</div>
+      <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
+      <div><b>Rule complexity:</b> {{ levelConfig.ruleComplexity }}</div>
+      <div><b>Sequence length:</b> {{ levelConfig.sequenceLength }}</div>
+      <div><b>Options:</b> {{ levelConfig.optionCount }}</div>
+      <div><b>Time limit:</b> {{ levelConfig.timeLimitMs }} ms</div>
+      <div><b>Rule:</b> Choose the missing next symbol in the sequence.</div>
     </div>
 
-    <div class="pattern-box">
-      <div
-        v-for="(item, index) in currentPattern"
-        :key="index"
-        class="pattern-item"
-      >
-        {{ item }}
+    <div class="sequence-box">
+      <div v-if="currentPuzzle" class="sequence">
+        <div
+          v-for="(item, idx) in currentPuzzle.sequence"
+          :key="idx"
+          class="sequence-item"
+        >
+          {{ item }}
+        </div>
+        <div class="sequence-item missing">?</div>
       </div>
+      <div v-else class="placeholder">—</div>
     </div>
 
-    <div class="answers">
+    <div class="options" v-if="currentPuzzle">
       <button
-        v-for="option in currentOptions"
+        v-for="option in currentPuzzle.options"
         :key="option.id"
-        :disabled="phase !== 'running' || currentOptions.length === 0 || answered"
-        @click="submitAnswer(option)"
+        :disabled="phase !== 'running' || answered"
+        @click="submitAnswer(option.value)"
       >
         {{ option.value }}
       </button>
@@ -38,11 +46,20 @@
       <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
     </div>
 
+    <div class="hint">
+      Difficulty rises by increasing sequence complexity, number of distractors, and time pressure.
+    </div>
+
+    <div v-if="lastFeedback" class="feedback" :class="lastFeedback.kind">
+      {{ lastFeedback.text }}
+    </div>
+
     <div v-if="phase === 'finished'" class="results">
       <h3>Results</h3>
       <ul>
         <li>Correct: {{ summary.correct }}</li>
         <li>Incorrect: {{ summary.incorrect }}</li>
+        <li>Timeouts: {{ summary.timeouts }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
@@ -87,32 +104,154 @@ const {
   updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
-  maxDifficulty: 5,
-  startDifficulty: 1,
-  successThreshold: 2
+  maxDifficulty: 10,
+  startDifficulty: 2,
+  fastThresholdMs: 1400,
+  slowThresholdMs: 7000,
+  targetAccuracyMin: 0.72,
+  targetAccuracyMax: 0.92,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 78,
+  scoreDecreaseThreshold: 48,
+  maxPendingPenalty: 2
 });
 
-const totalTrials = ref(12);
-const isiMs = ref(700);
+const totalRounds = ref(14);
 
-const stimulusDurationMs = computed(() => {
-  if (difficulty.value === 1) return 7000;
-  if (difficulty.value === 2) return 6000;
-  if (difficulty.value === 3) return 5000;
-  if (difficulty.value === 4) return 4200;
-  return 3500;
+const difficultySettings = [
+  { ruleComplexity: 1, sequenceLength: 3, optionCount: 3, timeLimitMs: 12000 },
+  { ruleComplexity: 1, sequenceLength: 4, optionCount: 3, timeLimitMs: 10500 },
+  { ruleComplexity: 2, sequenceLength: 4, optionCount: 4, timeLimitMs: 9500 },
+  { ruleComplexity: 2, sequenceLength: 5, optionCount: 4, timeLimitMs: 8600 },
+  { ruleComplexity: 2, sequenceLength: 5, optionCount: 5, timeLimitMs: 7800 },
+  { ruleComplexity: 3, sequenceLength: 5, optionCount: 5, timeLimitMs: 7000 },
+  { ruleComplexity: 3, sequenceLength: 6, optionCount: 5, timeLimitMs: 6300 },
+  { ruleComplexity: 3, sequenceLength: 6, optionCount: 6, timeLimitMs: 5600 },
+  { ruleComplexity: 4, sequenceLength: 6, optionCount: 6, timeLimitMs: 5000 },
+  { ruleComplexity: 4, sequenceLength: 7, optionCount: 6, timeLimitMs: 4400 }
+];
+
+const levelConfig = computed(() => {
+  const index = Math.max(0, Math.min(difficultySettings.length - 1, difficulty.value - 1));
+  return difficultySettings[index];
 });
 
-const currentPattern = ref([]);
-const currentOptions = ref([]);
-const correctOptionId = ref(null);
+const symbolPool = ["▲", "■", "●", "◆", "★", "▶", "◀", "✚"];
 
+const currentPuzzle = ref(null);
 const shownAtMs = ref(null);
 const answered = ref(false);
 const answeredAtMs = ref(null);
+const lastFeedback = ref(null);
 
 function nowMs() {
   return performance.now();
+}
+
+function randomItem(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function shuffle(array) {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = temp;
+  }
+  return arr;
+}
+
+function uniqueDistractors(correctValue, count) {
+  const pool = symbolPool.filter(s => s !== correctValue);
+  const picked = shuffle(pool).slice(0, count);
+  return picked;
+}
+
+function buildRuleComplexity1(length) {
+  const cycle = shuffle(symbolPool).slice(0, 2);
+  const full = [];
+  for (let i = 0; i < length + 1; i++) {
+    full.push(cycle[i % cycle.length]);
+  }
+  return {
+    ruleType: "alternation_2",
+    sequence: full.slice(0, length),
+    answer: full[length]
+  };
+}
+
+function buildRuleComplexity2(length) {
+  const cycle = shuffle(symbolPool).slice(0, 3);
+  const full = [];
+  for (let i = 0; i < length + 1; i++) {
+    full.push(cycle[i % cycle.length]);
+  }
+  return {
+    ruleType: "alternation_3",
+    sequence: full.slice(0, length),
+    answer: full[length]
+  };
+}
+
+function buildRuleComplexity3(length) {
+  const block = shuffle(symbolPool).slice(0, 3);
+  const pattern = [
+    block[0], block[0],
+    block[1], block[1],
+    block[2], block[2]
+  ];
+
+  const full = [];
+  for (let i = 0; i < length + 1; i++) {
+    full.push(pattern[i % pattern.length]);
+  }
+
+  return {
+    ruleType: "double_repeat",
+    sequence: full.slice(0, length),
+    answer: full[length]
+  };
+}
+
+function buildRuleComplexity4(length) {
+  const cycle = shuffle(symbolPool).slice(0, 4);
+  const full = [];
+  for (let i = 0; i < length + 1; i++) {
+    full.push(cycle[i % cycle.length]);
+  }
+  return {
+    ruleType: "alternation_4",
+    sequence: full.slice(0, length),
+    answer: full[length]
+  };
+}
+
+function generatePuzzle() {
+  const complexity = levelConfig.value.ruleComplexity;
+  const length = levelConfig.value.sequenceLength;
+
+  let base;
+  if (complexity === 1) base = buildRuleComplexity1(length);
+  else if (complexity === 2) base = buildRuleComplexity2(length);
+  else if (complexity === 3) base = buildRuleComplexity3(length);
+  else base = buildRuleComplexity4(length);
+
+  const distractorCount = levelConfig.value.optionCount - 1;
+  const options = shuffle([
+    { id: 1, value: base.answer },
+    ...uniqueDistractors(base.answer, distractorCount).map((value, idx) => ({
+      id: idx + 2,
+      value
+    }))
+  ]);
+
+  return {
+    ...base,
+    options
+  };
 }
 
 function reset() {
@@ -120,188 +259,112 @@ function reset() {
   resetSession();
   resetDifficulty();
 
-  currentPattern.value = [];
-  currentOptions.value = [];
-  correctOptionId.value = null;
+  currentPuzzle.value = null;
   shownAtMs.value = null;
   answered.value = false;
   answeredAtMs.value = null;
+  lastFeedback.value = null;
 }
 
 function stop() {
   clearAllTimeouts();
-  currentPattern.value = [];
-  currentOptions.value = [];
-  correctOptionId.value = null;
+  currentPuzzle.value = null;
   stopSession();
 }
 
 function start() {
   reset();
   startSession();
-  nextPatternTrial();
+  nextPatternRound();
 }
 
-function randomItem(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+function finalizeRound(answerValue = null) {
+  if (!currentPuzzle.value || shownAtMs.value === null) return;
 
-function shuffle(arr) {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const temp = copy[i];
-    copy[i] = copy[j];
-    copy[j] = temp;
-  }
-  return copy;
-}
-
-function getRulesByDifficulty() {
-  const easy = [
-    {
-      type: "alternating-circles",
-      pattern: ["●", "○", "●", "○", "?"],
-      answer: "●",
-      distractors: ["○", "■", "▲"]
-    },
-    {
-      type: "alternating-squares",
-      pattern: ["■", "□", "■", "□", "?"],
-      answer: "■",
-      distractors: ["□", "●", "▲"]
-    }
-  ];
-
-  const medium = [
-    {
-      type: "triple-repeat",
-      pattern: ["▲", "▲", "●", "▲", "▲", "?"],
-      answer: "●",
-      distractors: ["▲", "■", "○"]
-    },
-    {
-      type: "block-repeat",
-      pattern: ["●", "●", "○", "●", "●", "?"],
-      answer: "○",
-      distractors: ["●", "■", "▲"]
-    }
-  ];
-
-  const hard = [
-    {
-      type: "pair-alternation",
-      pattern: ["■", "■", "●", "●", "■", "■", "?"],
-      answer: "●",
-      distractors: ["■", "▲", "○"]
-    },
-    {
-      type: "mirror-repeat",
-      pattern: ["▲", "●", "▲", "●", "?"],
-      answer: "▲",
-      distractors: ["●", "■", "□"]
-    }
-  ];
-
-  if (difficulty.value <= 2) return easy;
-  if (difficulty.value <= 4) return [...easy, ...medium];
-  return [...easy, ...medium, ...hard];
-}
-
-function generateRule() {
-  return randomItem(getRulesByDifficulty());
-}
-
-function buildOptions(correctAnswer, distractors) {
-  const options = [
-    { id: 1, value: correctAnswer, correct: true },
-    { id: 2, value: distractors[0], correct: false },
-    { id: 3, value: distractors[1], correct: false },
-    { id: 4, value: distractors[2], correct: false }
-  ];
-
-  return shuffle(options).map((option, index) => ({
-    ...option,
-    id: index + 1
-  }));
-}
-
-function finalizeTrial(selectedOption = null) {
-  if (shownAtMs.value === null) return;
-
-  const correct = selectedOption ? selectedOption.id === correctOptionId.value : false;
-  const rtMs = selectedOption && answeredAtMs.value !== null
+  const responded = answerValue !== null;
+  const timedOut = !responded;
+  const correct = responded && answerValue === currentPuzzle.value.answer;
+  const rtMs = responded && answeredAtMs.value !== null
     ? Math.max(0, answeredAtMs.value - shownAtMs.value)
     : null;
 
+  const complexityPenalty = !correct ? currentPuzzle.value.ruleType === "alternation_4" ? 0.10 : 0.06 : 0;
+  const timeoutPenalty = timedOut ? 0.18 : 0;
+  const wrongPenalty = responded && !correct ? 0.14 : 0;
+
   addResponse({
-    trial: trialIndex.value,
-    pattern: [...currentPattern.value],
-    selected: selectedOption ? selectedOption.value : null,
-    correct,
+    round: trialIndex.value,
     difficulty: difficulty.value,
+    ruleComplexity: levelConfig.value.ruleComplexity,
+    sequenceLength: levelConfig.value.sequenceLength,
+    optionCount: levelConfig.value.optionCount,
+    timeLimitMs: levelConfig.value.timeLimitMs,
+    ruleType: currentPuzzle.value.ruleType,
+    sequence: currentPuzzle.value.sequence,
+    answer: currentPuzzle.value.answer,
+    answerValue,
+    responded,
+    timedOut,
+    correct,
     rtMs
   });
 
-  updateDifficulty(correct);
+  updateDifficulty({
+    correct,
+    rtMs,
+    lapse: timedOut,
+    penalty: complexityPenalty + timeoutPenalty + wrongPenalty
+  });
+
+  lastFeedback.value = correct
+    ? { kind: "ok", text: "Correct" }
+    : { kind: "bad", text: `Incorrect${timedOut ? " (timeout)" : ""}. Expected: ${currentPuzzle.value.answer}` };
 }
 
-function nextPatternTrial() {
+function nextPatternRound() {
   if (phase.value !== "running") return;
 
-  if (trialIndex.value >= totalTrials.value) {
-    currentPattern.value = [];
-    currentOptions.value = [];
-    correctOptionId.value = null;
+  if (trialIndex.value >= totalRounds.value) {
+    currentPuzzle.value = null;
     stopSession();
     return;
   }
 
   nextTrial();
+  lastFeedback.value = null;
 
-  const rule = generateRule();
-  const options = buildOptions(rule.answer, rule.distractors);
-  const correctOption = options.find(option => option.correct);
-
-  currentPattern.value = rule.pattern;
-  currentOptions.value = options;
-  correctOptionId.value = correctOption ? correctOption.id : null;
-
+  currentPuzzle.value = generatePuzzle();
   shownAtMs.value = nowMs();
   answered.value = false;
   answeredAtMs.value = null;
 
   setManagedTimeout(() => {
     if (!answered.value) {
-      finalizeTrial(null);
-      currentPattern.value = [];
-      currentOptions.value = [];
-      correctOptionId.value = null;
+      finalizeRound(null);
+      currentPuzzle.value = null;
 
       setManagedTimeout(() => {
-        nextPatternTrial();
-      }, isiMs.value);
+        nextPatternRound();
+      }, 700);
     }
-  }, stimulusDurationMs.value);
+  }, levelConfig.value.timeLimitMs);
 }
 
-function submitAnswer(option) {
+function submitAnswer(answerValue) {
   if (phase.value !== "running") return;
+  if (!currentPuzzle.value) return;
   if (answered.value) return;
 
   answered.value = true;
   answeredAtMs.value = nowMs();
 
   clearAllTimeouts();
-  finalizeTrial(option);
-
-  currentPattern.value = [];
-  currentOptions.value = [];
-  correctOptionId.value = null;
+  finalizeRound(answerValue);
+  currentPuzzle.value = null;
 
   setManagedTimeout(() => {
-    nextPatternTrial();
-  }, isiMs.value);
+    nextPatternRound();
+  }, 700);
 }
 
 onBeforeUnmount(() => {
@@ -310,21 +373,18 @@ onBeforeUnmount(() => {
 
 const summary = computed(() => {
   const correct = responses.value.filter(r => r.correct).length;
-  const incorrect = responses.value.length - correct;
+  const incorrect = responses.value.filter(r => !r.correct && !r.timedOut).length;
+  const timeouts = responses.value.filter(r => r.timedOut).length;
 
-  const rts = responses.value
-    .map(r => r.rtMs)
-    .filter(v => v !== null);
+  const rts = responses.value.map(r => r.rtMs).filter(v => v !== null);
+  const avgRTms = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
 
   return {
     correct,
     incorrect,
-    accuracy: responses.value.length
-      ? (correct / responses.value.length) * 100
-      : 0,
-    avgRTms: rts.length
-      ? rts.reduce((a, b) => a + b, 0) / rts.length
-      : null,
+    timeouts,
+    accuracy: responses.value.length ? (correct / responses.value.length) * 100 : 0,
+    avgRTms,
     finalDifficulty: difficulty.value
   };
 });
@@ -333,10 +393,11 @@ const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
     settings: {
-      totalTrials: totalTrials.value,
-      stimulusDurationMs: stimulusDurationMs.value,
-      isiMs: isiMs.value,
-      optionCount: 4,
+      totalRounds: totalRounds.value,
+      ruleComplexity: levelConfig.value.ruleComplexity,
+      sequenceLength: levelConfig.value.sequenceLength,
+      optionCount: levelConfig.value.optionCount,
+      timeLimitMs: levelConfig.value.timeLimitMs,
       adaptive: true
     }
   })
@@ -345,7 +406,7 @@ const payload = computed(() =>
 
 <style scoped>
 .module {
-  max-width: 820px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
@@ -358,34 +419,52 @@ const payload = computed(() =>
   margin-bottom: 12px;
 }
 
-.pattern-box {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  min-height: 90px;
-  margin: 20px 0;
-}
-
-.pattern-item {
-  min-width: 52px;
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #ddd;
+.sequence-box {
+  min-height: 150px;
+  border: 1px dashed #ccc;
   border-radius: 12px;
-  font-size: 28px;
-  background: white;
+  background: #fafafa;
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+  padding: 16px;
 }
 
-.answers {
+.sequence {
   display: flex;
   gap: 10px;
-  justify-content: center;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  justify-content: center;
+}
+
+.sequence-item {
+  width: 70px;
+  height: 70px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  background: white;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.sequence-item.missing {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+}
+
+.placeholder {
+  font-size: 42px;
+  color: #999;
+}
+
+.options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  justify-content: center;
 }
 
 .controls {
@@ -406,6 +485,29 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.hint {
+  color: #555;
+  margin-bottom: 12px;
+}
+
+.feedback {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.feedback.ok {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.feedback.bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
 .results {

@@ -1,28 +1,35 @@
 <template>
-  <div class="module">
+  <div class="module" :class="flashKind">
     <h2>Digit Span</h2>
 
-    <div class="panel">
+    <div class="topbar">
       <div><b>Kategória:</b> Pamäť</div>
-      <div><b>Status:</b> {{ phase }}</div>
       <div><b>Mode:</b> {{ modeLabel }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
-      <div><b>Span length:</b> {{ levelConfig.spanLength }}</div>
-      <div><b>Digit duration:</b> {{ levelConfig.digitDurationMs }} ms</div>
-      <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
       <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
+    </div>
 
+    <div class="scorebar">
+      <div><b>Score:</b> {{ score }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div>
+      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+    </div>
+
+    <div class="panel">
       <div class="stimulusBox" v-if="phase === 'showing'">
         <div class="stimulus">{{ displayDigit }}</div>
-        <div class="subhint">Memorize digits…</div>
+        <div class="subhint">Zapamätaj si čísla…</div>
       </div>
 
       <div class="stimulusBox" v-else>
         <div class="stimulus">{{ phase === 'idle' ? "—" : "Ready" }}</div>
         <div class="subhint">
-          {{ phase === 'answering' ? "Type the sequence and submit." : "Press Start to begin." }}
+          {{ phase === 'answering' ? "Napíš sekvenciu a potvrď." : "Stlač Start." }}
         </div>
+      </div>
+
+      <div v-if="feedback" class="feedback" :class="feedback.kind">
+        {{ feedback.text }}
       </div>
     </div>
 
@@ -52,11 +59,13 @@
         />
         <button @click="submitAnswer">Submit</button>
       </div>
-      <div class="hint">Tip: write digits without spaces.</div>
     </div>
 
-    <div v-if="lastFeedback" class="feedback" :class="lastFeedback.kind">
-      {{ lastFeedback.text }}
+    <div v-if="showDebug" class="debug">
+      <div><b>Span length:</b> {{ levelConfig.spanLength }}</div>
+      <div><b>Digit duration:</b> {{ levelConfig.digitDurationMs }} ms</div>
+      <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
+      <div><b>Success streak:</b> {{ successStreak }}</div>
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -67,6 +76,8 @@
         <li>Correct rounds: {{ summary.correctRounds }} / {{ summary.totalRounds }}</li>
         <li>Avg answer time: {{ summary.avgAnswerTimeMs === null ? "—" : summary.avgAnswerTimeMs.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
+        <li>Final score: {{ score }}</li>
+        <li>Best score: {{ bestScore }}</li>
       </ul>
 
       <details>
@@ -82,6 +93,8 @@ import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
+import { useGameScoring } from "../composables/useGameScoring";
+import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "memory_digit_span";
 const CATEGORY = "pamat";
@@ -105,36 +118,45 @@ const {
   difficultyLabel,
   successStreak,
   resetDifficulty,
-  updateDifficulty
+  updateDifficulty,
+  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
-  startDifficulty: 2,
-  fastThresholdMs: 2200,
-  slowThresholdMs: 9000,
-  targetAccuracyMin: 0.72,
-  targetAccuracyMax: 0.92,
+  startDifficulty: 3,
+  fastThresholdMs: 1800,
+  slowThresholdMs: 8000,
+  targetAccuracyMin: 0.68,
+  targetAccuracyMax: 0.86,
   windowSize: 4,
   evaluateEvery: 2,
-  scoreIncreaseThreshold: 78,
-  scoreDecreaseThreshold: 48,
-  maxPendingPenalty: 2
+  scoreIncreaseThreshold: 72,
+  scoreDecreaseThreshold: 42
+});
+
+const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+  fastThresholdMs: 1800,
+  slowThresholdMs: 8000
+});
+
+const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
+  durationMs: 850
 });
 
 const mode = ref("forward");
 const totalRounds = ref(10);
 
 const difficultySettings = [
-  { spanLength: 3, digitDurationMs: 900, gapMs: 350 },
-  { spanLength: 4, digitDurationMs: 850, gapMs: 320 },
-  { spanLength: 4, digitDurationMs: 760, gapMs: 300 },
-  { spanLength: 5, digitDurationMs: 720, gapMs: 280 },
-  { spanLength: 5, digitDurationMs: 650, gapMs: 260 },
-  { spanLength: 6, digitDurationMs: 620, gapMs: 240 },
-  { spanLength: 6, digitDurationMs: 560, gapMs: 220 },
-  { spanLength: 7, digitDurationMs: 520, gapMs: 200 },
-  { spanLength: 7, digitDurationMs: 470, gapMs: 180 },
-  { spanLength: 8, digitDurationMs: 430, gapMs: 160 }
+  { spanLength: 4, digitDurationMs: 760, gapMs: 280 },
+  { spanLength: 4, digitDurationMs: 700, gapMs: 260 },
+  { spanLength: 5, digitDurationMs: 660, gapMs: 240 },
+  { spanLength: 5, digitDurationMs: 610, gapMs: 220 },
+  { spanLength: 6, digitDurationMs: 570, gapMs: 200 },
+  { spanLength: 6, digitDurationMs: 520, gapMs: 180 },
+  { spanLength: 7, digitDurationMs: 480, gapMs: 160 },
+  { spanLength: 7, digitDurationMs: 430, gapMs: 150 },
+  { spanLength: 8, digitDurationMs: 390, gapMs: 140 },
+  { spanLength: 9, digitDurationMs: 350, gapMs: 130 }
 ];
 
 const levelConfig = computed(() => {
@@ -149,8 +171,6 @@ const answer = ref("");
 const answerShownAtMs = ref(null);
 const answeredAtMs = ref(null);
 
-const lastFeedback = ref(null);
-
 function nowMs() {
   return performance.now();
 }
@@ -159,13 +179,14 @@ function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
+  resetScore();
+  clearFeedback();
 
   currentSequence.value = [];
   displayDigit.value = "";
   answer.value = "";
   answerShownAtMs.value = null;
   answeredAtMs.value = null;
-  lastFeedback.value = null;
 }
 
 function stop() {
@@ -186,9 +207,7 @@ function randomDigit() {
 
 function generateSequence(len) {
   const seq = [];
-  for (let i = 0; i < len; i++) {
-    seq.push(randomDigit());
-  }
+  for (let i = 0; i < len; i++) seq.push(randomDigit());
   return seq;
 }
 
@@ -206,7 +225,6 @@ function nextDigitSpanRound() {
     return;
   }
 
-  lastFeedback.value = null;
   answer.value = "";
   displayDigit.value = "";
 
@@ -252,13 +270,8 @@ function submitAnswer() {
     ? Math.max(0, answeredAtMs.value - answerShownAtMs.value)
     : null;
 
-  const charsCorrect = given.length === expected.length
-    ? [...given].filter((digit, idx) => digit === expected[idx]).length
-    : [...given].filter((digit, idx) => digit === expected[idx]).length;
-
-  const partialAccuracy = expected.length
-    ? charsCorrect / expected.length
-    : 0;
+  const charsCorrect = [...given].filter((digit, idx) => digit === expected[idx]).length;
+  const partialAccuracy = expected.length ? charsCorrect / expected.length : 0;
 
   addResponse({
     round: trialIndex.value,
@@ -276,16 +289,26 @@ function submitAnswer() {
     timestampMs: Date.now()
   });
 
-  lastFeedback.value = correct
-    ? { kind: "ok", text: "Correct" }
-    : { kind: "bad", text: `Incorrect (expected: ${expected})` };
-
   updateDifficulty({
     aggregate: true,
     accuracy: correct ? 1 : partialAccuracy,
     avgRTms: rtMs,
     penalty: correct ? 0 : 0.14,
     sampleCount: 1
+  });
+
+  awardScore({
+    correct,
+    difficulty: difficulty.value,
+    rtMs,
+    accuracy: correct ? 1 : partialAccuracy,
+    penalty: correct ? 0 : 0.3
+  });
+
+  showFeedback({
+    correct,
+    correctText: "Správne",
+    incorrectText: `Nesprávne (správne: ${expected})`
   });
 
   phase.value = "showing";
@@ -306,9 +329,7 @@ const summary = computed(() => {
 
   let maxSpanReached = 0;
   for (const r of recs) {
-    if (r.correct && r.span > maxSpanReached) {
-      maxSpanReached = r.span;
-    }
+    if (r.correct && r.span > maxSpanReached) maxSpanReached = r.span;
   }
 
   const answerTimes = recs
@@ -332,13 +353,16 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
+    score: score.value,
+    bestScore: bestScore.value,
     settings: {
       totalRounds: totalRounds.value,
       mode: mode.value,
       spanLength: levelConfig.value.spanLength,
       digitDurationMs: levelConfig.value.digitDurationMs,
       gapMs: levelConfig.value.gapMs,
-      adaptive: true
+      adaptive: true,
+      localScore: true
     }
   })
 );
@@ -350,6 +374,23 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  transition: background-color 0.25s ease;
+}
+
+.flash-ok {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.flash-bad {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.topbar,
+.scorebar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .panel {
@@ -367,6 +408,7 @@ const payload = computed(() =>
   display: grid;
   place-items: center;
   background: #fafafa;
+  padding: 12px;
 }
 
 .stimulus {
@@ -419,7 +461,7 @@ select {
 }
 
 .feedback {
-  margin-top: 10px;
+  margin-top: 12px;
   padding: 10px 12px;
   border-radius: 10px;
 }
@@ -436,9 +478,14 @@ select {
   border: 1px solid #fecaca;
 }
 
-.hint {
-  color: #666;
-  margin-top: 6px;
+.debug {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #ccc;
+  border-radius: 12px;
+  display: grid;
+  gap: 6px;
+  background: #fafafa;
 }
 
 .results {

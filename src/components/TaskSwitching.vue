@@ -1,19 +1,35 @@
 <template>
-  <div class="module">
+  <div class="module" :class="flashKind">
     <h2>Task Switching</h2>
 
-    <div class="panel">
+    <div class="topbar">
       <div><b>Kategória:</b> Logické myslenie</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
-      <div><b>Switch probability:</b> {{ (levelConfig.switchProbability * 100).toFixed(0) }}%</div>
+    </div>
+
+    <div class="scorebar">
+      <div><b>Score:</b> {{ score }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div>
+      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+    </div>
+
+    <div class="panel">
       <div><b>Rule:</b></div>
       <div>Blue frame → choose <b>color</b></div>
       <div>Green frame → choose <b>shape</b></div>
+
+      <div v-if="feedback" class="feedback" :class="feedback.kind">
+        {{ feedback.text }}
+      </div>
+
+      <template v-if="showDebug">
+        <div><b>Success streak:</b> {{ successStreak }}</div>
+        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+        <div><b>Switch probability:</b> {{ (levelConfig.switchProbability * 100).toFixed(0) }}%</div>
+      </template>
     </div>
 
     <div
@@ -51,7 +67,7 @@
     </div>
 
     <div class="hint">
-      Goal: react quickly and correctly, especially on <b>switch</b> trials when the rule changes.
+      Goal: react quickly and correctly, especially on switch trials.
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -61,14 +77,12 @@
         <li>Incorrect: {{ summary.incorrect }}</li>
         <li>Timeouts: {{ summary.timeouts }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
-        <li>Switch trials: {{ summary.switchTrials }}</li>
-        <li>Repeat trials: {{ summary.repeatTrials }}</li>
         <li>Switch accuracy: {{ summary.switchAccuracy.toFixed(1) }}%</li>
         <li>Repeat accuracy: {{ summary.repeatAccuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
-        <li>Avg RT (switch): {{ summary.avgSwitchRT === null ? "—" : summary.avgSwitchRT.toFixed(0) + " ms" }}</li>
-        <li>Avg RT (repeat): {{ summary.avgRepeatRT === null ? "—" : summary.avgRepeatRT.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
+        <li>Final score: {{ score }}</li>
+        <li>Best score: {{ bestScore }}</li>
       </ul>
 
       <details>
@@ -84,6 +98,8 @@ import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
+import { useGameScoring } from "../composables/useGameScoring";
+import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "attention_task_switching";
 const CATEGORY = "pozornost";
@@ -107,35 +123,44 @@ const {
   difficultyLabel,
   successStreak,
   resetDifficulty,
-  updateDifficulty
+  updateDifficulty,
+  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
-  startDifficulty: 2,
-  fastThresholdMs: 950,
-  slowThresholdMs: 2600,
-  targetAccuracyMin: 0.76,
-  targetAccuracyMax: 0.92,
-  windowSize: 6,
-  evaluateEvery: 3,
-  scoreIncreaseThreshold: 80,
-  scoreDecreaseThreshold: 49,
-  maxPendingPenalty: 2
+  startDifficulty: 3,
+  fastThresholdMs: 820,
+  slowThresholdMs: 2200,
+  targetAccuracyMin: 0.72,
+  targetAccuracyMax: 0.88,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 72,
+  scoreDecreaseThreshold: 42
+});
+
+const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+  fastThresholdMs: 820,
+  slowThresholdMs: 2200
+});
+
+const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
+  durationMs: 750
 });
 
 const totalTrials = ref(24);
 
 const difficultySettings = [
-  { stimulusDurationMs: 4200, isiMs: 700, switchProbability: 0.20 },
-  { stimulusDurationMs: 3800, isiMs: 680, switchProbability: 0.24 },
-  { stimulusDurationMs: 3400, isiMs: 640, switchProbability: 0.30 },
-  { stimulusDurationMs: 3100, isiMs: 600, switchProbability: 0.36 },
-  { stimulusDurationMs: 2800, isiMs: 560, switchProbability: 0.42 },
-  { stimulusDurationMs: 2450, isiMs: 520, switchProbability: 0.48 },
-  { stimulusDurationMs: 2150, isiMs: 480, switchProbability: 0.54 },
-  { stimulusDurationMs: 1850, isiMs: 430, switchProbability: 0.60 },
-  { stimulusDurationMs: 1600, isiMs: 380, switchProbability: 0.66 },
-  { stimulusDurationMs: 1350, isiMs: 340, switchProbability: 0.72 }
+  { stimulusDurationMs: 3000, isiMs: 560, switchProbability: 0.28 },
+  { stimulusDurationMs: 2700, isiMs: 520, switchProbability: 0.34 },
+  { stimulusDurationMs: 2400, isiMs: 480, switchProbability: 0.40 },
+  { stimulusDurationMs: 2150, isiMs: 450, switchProbability: 0.46 },
+  { stimulusDurationMs: 1900, isiMs: 420, switchProbability: 0.52 },
+  { stimulusDurationMs: 1700, isiMs: 390, switchProbability: 0.58 },
+  { stimulusDurationMs: 1500, isiMs: 360, switchProbability: 0.64 },
+  { stimulusDurationMs: 1320, isiMs: 330, switchProbability: 0.70 },
+  { stimulusDurationMs: 1160, isiMs: 300, switchProbability: 0.76 },
+  { stimulusDurationMs: 1000, isiMs: 270, switchProbability: 0.82 }
 ];
 
 const levelConfig = computed(() => {
@@ -166,6 +191,8 @@ function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
+  resetScore();
+  clearFeedback();
 
   currentStimulus.value = null;
   currentOptions.value = [];
@@ -189,15 +216,10 @@ function start() {
 }
 
 function chooseRule() {
-  if (!previousRule.value) {
-    return Math.random() < 0.5 ? "color" : "shape";
-  }
+  if (!previousRule.value) return Math.random() < 0.5 ? "color" : "shape";
 
   const shouldSwitch = Math.random() < levelConfig.value.switchProbability;
-  if (shouldSwitch) {
-    return previousRule.value === "color" ? "shape" : "color";
-  }
-
+  if (shouldSwitch) return previousRule.value === "color" ? "shape" : "color";
   return previousRule.value;
 }
 
@@ -206,9 +228,7 @@ function generateStimulus() {
   const color = randomItem(colors);
   const shape = randomItem(shapes);
 
-  const isSwitchTrial =
-    previousRule.value !== null &&
-    rule !== previousRule.value;
+  const isSwitchTrial = previousRule.value !== null && rule !== previousRule.value;
 
   let correctAnswer;
   let options;
@@ -247,7 +267,7 @@ function finalizeTrial(userAnswer = null) {
     ? Math.max(0, answeredAtMs.value - shownAtMs.value)
     : null;
 
-  const switchPenalty = currentStimulus.value.isSwitchTrial && !correct ? 0.08 : 0;
+  const switchPenalty = currentStimulus.value.isSwitchTrial && !correct ? 0.12 : 0;
   const timeoutPenalty = timedOut ? 0.18 : 0;
   const wrongPenalty = responded && !correct ? 0.14 : 0;
 
@@ -274,6 +294,19 @@ function finalizeTrial(userAnswer = null) {
     rtMs,
     lapse: timedOut,
     penalty: switchPenalty + timeoutPenalty + wrongPenalty
+  });
+
+  awardScore({
+    correct,
+    difficulty: difficulty.value,
+    rtMs,
+    penalty: switchPenalty + timeoutPenalty + wrongPenalty
+  });
+
+  showFeedback({
+    correct,
+    correctText: currentStimulus.value.isSwitchTrial ? "Správne - switch" : "Správne",
+    incorrectText: timedOut ? "Nesprávne - timeout" : currentStimulus.value.isSwitchTrial ? "Nesprávne - switch error" : "Nesprávne"
   });
 
   previousRule.value = currentStimulus.value.rule;
@@ -347,8 +380,6 @@ const summary = computed(() => {
   const repeatCorrect = responses.value.filter(r => !r.switchTrial && r.correct).length;
 
   const allRTs = responses.value.map(r => r.rtMs).filter(v => v !== null);
-  const switchRTs = responses.value.filter(r => r.switchTrial && r.rtMs !== null).map(r => r.rtMs);
-  const repeatRTs = responses.value.filter(r => !r.switchTrial && r.rtMs !== null).map(r => r.rtMs);
 
   const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
 
@@ -356,16 +387,10 @@ const summary = computed(() => {
     correct,
     incorrect,
     timeouts,
-    accuracy: responses.value.length
-      ? (correct / responses.value.length) * 100
-      : 0,
-    switchTrials,
-    repeatTrials,
+    accuracy: responses.value.length ? (correct / responses.value.length) * 100 : 0,
     switchAccuracy: switchTrials ? (switchCorrect / switchTrials) * 100 : 0,
     repeatAccuracy: repeatTrials ? (repeatCorrect / repeatTrials) * 100 : 0,
     avgRTms: avg(allRTs),
-    avgSwitchRT: avg(switchRTs),
-    avgRepeatRT: avg(repeatRTs),
     finalDifficulty: difficulty.value
   };
 });
@@ -373,13 +398,16 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
+    score: score.value,
+    bestScore: bestScore.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: levelConfig.value.stimulusDurationMs,
       isiMs: levelConfig.value.isiMs,
       switchProbability: levelConfig.value.switchProbability,
       rules: ["color", "shape"],
-      adaptive: true
+      adaptive: true,
+      localScore: true
     }
   })
 );
@@ -391,6 +419,23 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  transition: background-color 0.25s ease;
+}
+
+.flash-ok {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.flash-bad {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.topbar,
+.scorebar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .panel {
@@ -484,6 +529,24 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.feedback {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.feedback.ok {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.feedback.bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
 .hint {

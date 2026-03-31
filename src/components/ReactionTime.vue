@@ -1,17 +1,33 @@
 <template>
-  <div class="module">
+  <div class="module" :class="flashKind">
     <h2>Reaction Time Grid</h2>
 
-    <div class="panel">
+    <div class="topbar">
       <div><b>Kategória:</b> Vnímanie</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Grid:</b> {{ gridSize }} x {{ gridSize }}</div>
-      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+    </div>
+
+    <div class="scorebar">
+      <div><b>Score:</b> {{ score }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div>
+      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+    </div>
+
+    <div class="panel">
       <div><b>Rule:</b> Click the highlighted cell as quickly as possible.</div>
+
+      <div v-if="feedback" class="feedback" :class="feedback.kind">
+        {{ feedback.text }}
+      </div>
+
+      <template v-if="showDebug">
+        <div><b>Success streak:</b> {{ successStreak }}</div>
+        <div><b>Grid:</b> {{ gridSize }} x {{ gridSize }}</div>
+        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+      </template>
     </div>
 
     <div
@@ -48,6 +64,8 @@
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
+        <li>Final score: {{ score }}</li>
+        <li>Best score: {{ bestScore }}</li>
       </ul>
 
       <details>
@@ -63,6 +81,8 @@ import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
+import { useGameScoring } from "../composables/useGameScoring";
+import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "perception_reaction_time";
 const CATEGORY = "vnimanie";
@@ -86,35 +106,44 @@ const {
   difficultyLabel,
   successStreak,
   resetDifficulty,
-  updateDifficulty
+  updateDifficulty,
+  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
-  startDifficulty: 2,
-  fastThresholdMs: 320,
-  slowThresholdMs: 1000,
-  targetAccuracyMin: 0.82,
-  targetAccuracyMax: 0.96,
-  windowSize: 8,
-  evaluateEvery: 4,
-  scoreIncreaseThreshold: 84,
-  scoreDecreaseThreshold: 52,
-  maxPendingPenalty: 2
+  startDifficulty: 3,
+  fastThresholdMs: 280,
+  slowThresholdMs: 900,
+  targetAccuracyMin: 0.78,
+  targetAccuracyMax: 0.92,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 74,
+  scoreDecreaseThreshold: 44
+});
+
+const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+  fastThresholdMs: 280,
+  slowThresholdMs: 900
+});
+
+const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
+  durationMs: 650
 });
 
 const totalTrials = ref(22);
 
 const difficultySettings = [
-  { gridSize: 3, stimulusDurationMs: 2200, isiMs: 700 },
-  { gridSize: 3, stimulusDurationMs: 1900, isiMs: 650 },
-  { gridSize: 4, stimulusDurationMs: 1700, isiMs: 620 },
-  { gridSize: 4, stimulusDurationMs: 1500, isiMs: 580 },
-  { gridSize: 4, stimulusDurationMs: 1300, isiMs: 540 },
-  { gridSize: 5, stimulusDurationMs: 1150, isiMs: 500 },
-  { gridSize: 5, stimulusDurationMs: 1000, isiMs: 460 },
-  { gridSize: 5, stimulusDurationMs: 900, isiMs: 420 },
-  { gridSize: 6, stimulusDurationMs: 800, isiMs: 380 },
-  { gridSize: 6, stimulusDurationMs: 700, isiMs: 340 }
+  { gridSize: 4, stimulusDurationMs: 1500, isiMs: 500 },
+  { gridSize: 4, stimulusDurationMs: 1300, isiMs: 460 },
+  { gridSize: 4, stimulusDurationMs: 1150, isiMs: 420 },
+  { gridSize: 5, stimulusDurationMs: 1000, isiMs: 390 },
+  { gridSize: 5, stimulusDurationMs: 900, isiMs: 360 },
+  { gridSize: 5, stimulusDurationMs: 820, isiMs: 330 },
+  { gridSize: 6, stimulusDurationMs: 740, isiMs: 300 },
+  { gridSize: 6, stimulusDurationMs: 660, isiMs: 270 },
+  { gridSize: 6, stimulusDurationMs: 580, isiMs: 240 },
+  { gridSize: 7, stimulusDurationMs: 500, isiMs: 220 }
 ];
 
 const levelConfig = computed(() => {
@@ -130,7 +159,6 @@ const cells = computed(() => {
 });
 
 const activeCell = ref(null);
-
 const shownAtMs = ref(null);
 const clicked = ref(false);
 const clickedAtMs = ref(null);
@@ -143,6 +171,8 @@ function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
+  resetScore();
+  clearFeedback();
 
   activeCell.value = null;
   shownAtMs.value = null;
@@ -196,6 +226,19 @@ function finalizeTrial() {
     rtMs,
     lapse,
     penalty: lapse ? 0.16 : 0
+  });
+
+  awardScore({
+    correct,
+    difficulty: difficulty.value,
+    rtMs,
+    penalty: lapse ? 0.22 : 0
+  });
+
+  showFeedback({
+    correct,
+    correctText: "Správne",
+    incorrectText: "Nesprávne"
   });
 }
 
@@ -264,12 +307,15 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
+    score: score.value,
+    bestScore: bestScore.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: levelConfig.value.stimulusDurationMs,
       isiMs: levelConfig.value.isiMs,
       gridSize: `${gridSize.value}x${gridSize.value}`,
-      adaptive: true
+      adaptive: true,
+      localScore: true
     }
   })
 );
@@ -281,6 +327,23 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  transition: background-color 0.25s ease;
+}
+
+.flash-ok {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.flash-bad {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.topbar,
+.scorebar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .panel {
@@ -331,6 +394,24 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.feedback {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.feedback.ok {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.feedback.bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
 .hint {

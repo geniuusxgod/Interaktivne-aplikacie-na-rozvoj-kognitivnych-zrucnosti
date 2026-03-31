@@ -1,19 +1,35 @@
 <template>
-  <div class="module">
+  <div class="module" :class="flashKind">
     <h2>Visual Search</h2>
 
-    <div class="panel">
+    <div class="topbar">
       <div><b>Kategória:</b> Vnímanie</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Grid:</b> {{ levelConfig.gridColumns }} x {{ levelConfig.gridRows }}</div>
-      <div><b>Items:</b> {{ itemCount }}</div>
-      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
-      <div><b>Target mode:</b> {{ levelConfig.targetMode }}</div>
+    </div>
+
+    <div class="scorebar">
+      <div><b>Score:</b> {{ score }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div>
+      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+    </div>
+
+    <div class="panel">
       <div><b>Rule:</b> Find and click the different symbol as quickly as possible.</div>
+
+      <div v-if="feedback" class="feedback" :class="feedback.kind">
+        {{ feedback.text }}
+      </div>
+
+      <template v-if="showDebug">
+        <div><b>Success streak:</b> {{ successStreak }}</div>
+        <div><b>Grid:</b> {{ levelConfig.gridColumns }} x {{ levelConfig.gridRows }}</div>
+        <div><b>Items:</b> {{ itemCount }}</div>
+        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+        <div><b>Target mode:</b> {{ levelConfig.targetMode }}</div>
+      </template>
     </div>
 
     <div
@@ -51,6 +67,8 @@
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
+        <li>Final score: {{ score }}</li>
+        <li>Best score: {{ bestScore }}</li>
       </ul>
 
       <details>
@@ -66,6 +84,8 @@ import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
+import { useGameScoring } from "../composables/useGameScoring";
+import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "perception_visual_search";
 const CATEGORY = "vnimanie";
@@ -89,35 +109,44 @@ const {
   difficultyLabel,
   successStreak,
   resetDifficulty,
-  updateDifficulty
+  updateDifficulty,
+  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
-  startDifficulty: 2,
-  fastThresholdMs: 750,
-  slowThresholdMs: 2600,
-  targetAccuracyMin: 0.76,
-  targetAccuracyMax: 0.92,
-  windowSize: 6,
-  evaluateEvery: 3,
-  scoreIncreaseThreshold: 80,
-  scoreDecreaseThreshold: 50,
-  maxPendingPenalty: 2
+  startDifficulty: 3,
+  fastThresholdMs: 700,
+  slowThresholdMs: 2200,
+  targetAccuracyMin: 0.72,
+  targetAccuracyMax: 0.88,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 72,
+  scoreDecreaseThreshold: 42
+});
+
+const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+  fastThresholdMs: 700,
+  slowThresholdMs: 2200
+});
+
+const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
+  durationMs: 750
 });
 
 const totalTrials = ref(18);
 
 const difficultySettings = [
-  { gridColumns: 3, gridRows: 3, stimulusDurationMs: 3200, isiMs: 600, targetMode: "shape" },
-  { gridColumns: 4, gridRows: 3, stimulusDurationMs: 2900, isiMs: 580, targetMode: "shape" },
-  { gridColumns: 4, gridRows: 4, stimulusDurationMs: 2600, isiMs: 560, targetMode: "shape" },
-  { gridColumns: 5, gridRows: 4, stimulusDurationMs: 2350, isiMs: 520, targetMode: "shape" },
-  { gridColumns: 5, gridRows: 5, stimulusDurationMs: 2100, isiMs: 500, targetMode: "shape" },
-  { gridColumns: 5, gridRows: 5, stimulusDurationMs: 1850, isiMs: 470, targetMode: "orientation" },
-  { gridColumns: 6, gridRows: 5, stimulusDurationMs: 1650, isiMs: 440, targetMode: "orientation" },
-  { gridColumns: 6, gridRows: 6, stimulusDurationMs: 1450, isiMs: 410, targetMode: "orientation" },
-  { gridColumns: 7, gridRows: 6, stimulusDurationMs: 1300, isiMs: 380, targetMode: "orientation" },
-  { gridColumns: 7, gridRows: 7, stimulusDurationMs: 1150, isiMs: 340, targetMode: "orientation" }
+  { gridColumns: 4, gridRows: 3, stimulusDurationMs: 2400, isiMs: 520, targetMode: "shape" },
+  { gridColumns: 4, gridRows: 4, stimulusDurationMs: 2200, isiMs: 500, targetMode: "shape" },
+  { gridColumns: 5, gridRows: 4, stimulusDurationMs: 2000, isiMs: 470, targetMode: "shape" },
+  { gridColumns: 5, gridRows: 5, stimulusDurationMs: 1800, isiMs: 440, targetMode: "shape" },
+  { gridColumns: 5, gridRows: 5, stimulusDurationMs: 1650, isiMs: 410, targetMode: "orientation" },
+  { gridColumns: 6, gridRows: 5, stimulusDurationMs: 1500, isiMs: 380, targetMode: "orientation" },
+  { gridColumns: 6, gridRows: 6, stimulusDurationMs: 1350, isiMs: 350, targetMode: "orientation" },
+  { gridColumns: 7, gridRows: 6, stimulusDurationMs: 1200, isiMs: 320, targetMode: "orientation" },
+  { gridColumns: 7, gridRows: 7, stimulusDurationMs: 1050, isiMs: 290, targetMode: "orientation" },
+  { gridColumns: 8, gridRows: 7, stimulusDurationMs: 900, isiMs: 260, targetMode: "orientation" }
 ];
 
 const levelConfig = computed(() => {
@@ -144,6 +173,8 @@ function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
+  resetScore();
+  clearFeedback();
 
   currentItems.value = [];
   targetId.value = null;
@@ -253,6 +284,19 @@ function finalizeTrial() {
     lapse: missed,
     penalty: wrongClick ? 0.24 : missed ? 0.14 : 0
   });
+
+  awardScore({
+    correct,
+    difficulty: difficulty.value,
+    rtMs: correct ? rtMs : null,
+    penalty: wrongClick ? 0.34 : missed ? 0.18 : 0
+  });
+
+  showFeedback({
+    correct,
+    correctText: "Správne",
+    incorrectText: wrongClick ? "Nesprávne - wrong click" : "Nesprávne - miss"
+  });
 }
 
 function nextVisualSearchTrial() {
@@ -331,6 +375,8 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
+    score: score.value,
+    bestScore: bestScore.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: levelConfig.value.stimulusDurationMs,
@@ -338,7 +384,8 @@ const payload = computed(() =>
       itemCount: itemCount.value,
       gridSize: `${levelConfig.value.gridColumns}x${levelConfig.value.gridRows}`,
       targetMode: levelConfig.value.targetMode,
-      adaptive: true
+      adaptive: true,
+      localScore: true
     }
   })
 );
@@ -350,6 +397,23 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  transition: background-color 0.25s ease;
+}
+
+.flash-ok {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.flash-bad {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.topbar,
+.scorebar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .panel {
@@ -400,6 +464,24 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.feedback {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.feedback.ok {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.feedback.bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
 .hint {

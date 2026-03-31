@@ -1,18 +1,34 @@
 <template>
-  <div class="module">
+  <div class="module" :class="flashKind">
     <h2>Pattern Reasoning</h2>
 
-    <div class="panel">
+    <div class="topbar">
       <div><b>Kategória:</b> Logické myslenie</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
-      <div><b>Rule complexity:</b> {{ levelConfig.ruleComplexity }}</div>
-      <div><b>Sequence length:</b> {{ levelConfig.sequenceLength }}</div>
-      <div><b>Options:</b> {{ levelConfig.optionCount }}</div>
-      <div><b>Time limit:</b> {{ levelConfig.timeLimitMs }} ms</div>
+    </div>
+
+    <div class="scorebar">
+      <div><b>Score:</b> {{ score }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div>
+      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+    </div>
+
+    <div class="panel">
       <div><b>Rule:</b> Choose the missing next symbol in the sequence.</div>
+
+      <div v-if="feedback" class="feedback" :class="feedback.kind">
+        {{ feedback.text }}
+      </div>
+
+      <template v-if="showDebug">
+        <div><b>Success streak:</b> {{ successStreak }}</div>
+        <div><b>Rule complexity:</b> {{ levelConfig.ruleComplexity }}</div>
+        <div><b>Sequence length:</b> {{ levelConfig.sequenceLength }}</div>
+        <div><b>Options:</b> {{ levelConfig.optionCount }}</div>
+        <div><b>Time limit:</b> {{ levelConfig.timeLimitMs }} ms</div>
+      </template>
     </div>
 
     <div class="sequence-box">
@@ -47,11 +63,7 @@
     </div>
 
     <div class="hint">
-      Difficulty rises by increasing sequence complexity, number of distractors, and time pressure.
-    </div>
-
-    <div v-if="lastFeedback" class="feedback" :class="lastFeedback.kind">
-      {{ lastFeedback.text }}
+      Difficulty rises by increasing pattern complexity, distractors, and time pressure.
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -63,6 +75,8 @@
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
+        <li>Final score: {{ score }}</li>
+        <li>Best score: {{ bestScore }}</li>
       </ul>
 
       <details>
@@ -78,6 +92,8 @@ import { ref, computed, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
+import { useGameScoring } from "../composables/useGameScoring";
+import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "logic_pattern_reasoning";
 const CATEGORY = "logicke_myslenie";
@@ -101,35 +117,44 @@ const {
   difficultyLabel,
   successStreak,
   resetDifficulty,
-  updateDifficulty
+  updateDifficulty,
+  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
   startDifficulty: 2,
-  fastThresholdMs: 1400,
-  slowThresholdMs: 7000,
-  targetAccuracyMin: 0.72,
-  targetAccuracyMax: 0.92,
+  fastThresholdMs: 1200,
+  slowThresholdMs: 6000,
+  targetAccuracyMin: 0.68,
+  targetAccuracyMax: 0.86,
   windowSize: 4,
   evaluateEvery: 2,
-  scoreIncreaseThreshold: 78,
-  scoreDecreaseThreshold: 48,
-  maxPendingPenalty: 2
+  scoreIncreaseThreshold: 72,
+  scoreDecreaseThreshold: 42
+});
+
+const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+  fastThresholdMs: 1200,
+  slowThresholdMs: 6000
+});
+
+const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
+  durationMs: 900
 });
 
 const totalRounds = ref(14);
 
 const difficultySettings = [
-  { ruleComplexity: 1, sequenceLength: 3, optionCount: 3, timeLimitMs: 12000 },
-  { ruleComplexity: 1, sequenceLength: 4, optionCount: 3, timeLimitMs: 10500 },
-  { ruleComplexity: 2, sequenceLength: 4, optionCount: 4, timeLimitMs: 9500 },
-  { ruleComplexity: 2, sequenceLength: 5, optionCount: 4, timeLimitMs: 8600 },
-  { ruleComplexity: 2, sequenceLength: 5, optionCount: 5, timeLimitMs: 7800 },
-  { ruleComplexity: 3, sequenceLength: 5, optionCount: 5, timeLimitMs: 7000 },
-  { ruleComplexity: 3, sequenceLength: 6, optionCount: 5, timeLimitMs: 6300 },
-  { ruleComplexity: 3, sequenceLength: 6, optionCount: 6, timeLimitMs: 5600 },
-  { ruleComplexity: 4, sequenceLength: 6, optionCount: 6, timeLimitMs: 5000 },
-  { ruleComplexity: 4, sequenceLength: 7, optionCount: 6, timeLimitMs: 4400 }
+  { ruleComplexity: 1, sequenceLength: 4, optionCount: 3, timeLimitMs: 9000 },
+  { ruleComplexity: 1, sequenceLength: 4, optionCount: 4, timeLimitMs: 8200 },
+  { ruleComplexity: 2, sequenceLength: 5, optionCount: 4, timeLimitMs: 7600 },
+  { ruleComplexity: 2, sequenceLength: 5, optionCount: 5, timeLimitMs: 7000 },
+  { ruleComplexity: 2, sequenceLength: 6, optionCount: 5, timeLimitMs: 6400 },
+  { ruleComplexity: 3, sequenceLength: 6, optionCount: 5, timeLimitMs: 5800 },
+  { ruleComplexity: 3, sequenceLength: 6, optionCount: 6, timeLimitMs: 5200 },
+  { ruleComplexity: 3, sequenceLength: 7, optionCount: 6, timeLimitMs: 4700 },
+  { ruleComplexity: 4, sequenceLength: 7, optionCount: 6, timeLimitMs: 4200 },
+  { ruleComplexity: 4, sequenceLength: 8, optionCount: 6, timeLimitMs: 3800 }
 ];
 
 const levelConfig = computed(() => {
@@ -143,7 +168,6 @@ const currentPuzzle = ref(null);
 const shownAtMs = ref(null);
 const answered = ref(false);
 const answeredAtMs = ref(null);
-const lastFeedback = ref(null);
 
 function nowMs() {
   return performance.now();
@@ -166,67 +190,36 @@ function shuffle(array) {
 
 function uniqueDistractors(correctValue, count) {
   const pool = symbolPool.filter(s => s !== correctValue);
-  const picked = shuffle(pool).slice(0, count);
-  return picked;
+  return shuffle(pool).slice(0, count);
 }
 
 function buildRuleComplexity1(length) {
   const cycle = shuffle(symbolPool).slice(0, 2);
   const full = [];
-  for (let i = 0; i < length + 1; i++) {
-    full.push(cycle[i % cycle.length]);
-  }
-  return {
-    ruleType: "alternation_2",
-    sequence: full.slice(0, length),
-    answer: full[length]
-  };
+  for (let i = 0; i < length + 1; i++) full.push(cycle[i % cycle.length]);
+  return { ruleType: "alternation_2", sequence: full.slice(0, length), answer: full[length] };
 }
 
 function buildRuleComplexity2(length) {
   const cycle = shuffle(symbolPool).slice(0, 3);
   const full = [];
-  for (let i = 0; i < length + 1; i++) {
-    full.push(cycle[i % cycle.length]);
-  }
-  return {
-    ruleType: "alternation_3",
-    sequence: full.slice(0, length),
-    answer: full[length]
-  };
+  for (let i = 0; i < length + 1; i++) full.push(cycle[i % cycle.length]);
+  return { ruleType: "alternation_3", sequence: full.slice(0, length), answer: full[length] };
 }
 
 function buildRuleComplexity3(length) {
   const block = shuffle(symbolPool).slice(0, 3);
-  const pattern = [
-    block[0], block[0],
-    block[1], block[1],
-    block[2], block[2]
-  ];
-
+  const pattern = [block[0], block[0], block[1], block[1], block[2], block[2]];
   const full = [];
-  for (let i = 0; i < length + 1; i++) {
-    full.push(pattern[i % pattern.length]);
-  }
-
-  return {
-    ruleType: "double_repeat",
-    sequence: full.slice(0, length),
-    answer: full[length]
-  };
+  for (let i = 0; i < length + 1; i++) full.push(pattern[i % pattern.length]);
+  return { ruleType: "double_repeat", sequence: full.slice(0, length), answer: full[length] };
 }
 
 function buildRuleComplexity4(length) {
   const cycle = shuffle(symbolPool).slice(0, 4);
   const full = [];
-  for (let i = 0; i < length + 1; i++) {
-    full.push(cycle[i % cycle.length]);
-  }
-  return {
-    ruleType: "alternation_4",
-    sequence: full.slice(0, length),
-    answer: full[length]
-  };
+  for (let i = 0; i < length + 1; i++) full.push(cycle[i % cycle.length]);
+  return { ruleType: "alternation_4", sequence: full.slice(0, length), answer: full[length] };
 }
 
 function generatePuzzle() {
@@ -248,22 +241,20 @@ function generatePuzzle() {
     }))
   ]);
 
-  return {
-    ...base,
-    options
-  };
+  return { ...base, options };
 }
 
 function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
+  resetScore();
+  clearFeedback();
 
   currentPuzzle.value = null;
   shownAtMs.value = null;
   answered.value = false;
   answeredAtMs.value = null;
-  lastFeedback.value = null;
 }
 
 function stop() {
@@ -291,6 +282,7 @@ function finalizeRound(answerValue = null) {
   const complexityPenalty = !correct ? currentPuzzle.value.ruleType === "alternation_4" ? 0.10 : 0.06 : 0;
   const timeoutPenalty = timedOut ? 0.18 : 0;
   const wrongPenalty = responded && !correct ? 0.14 : 0;
+  const totalPenalty = complexityPenalty + timeoutPenalty + wrongPenalty;
 
   addResponse({
     round: trialIndex.value,
@@ -313,12 +305,21 @@ function finalizeRound(answerValue = null) {
     correct,
     rtMs,
     lapse: timedOut,
-    penalty: complexityPenalty + timeoutPenalty + wrongPenalty
+    penalty: totalPenalty
   });
 
-  lastFeedback.value = correct
-    ? { kind: "ok", text: "Correct" }
-    : { kind: "bad", text: `Incorrect${timedOut ? " (timeout)" : ""}. Expected: ${currentPuzzle.value.answer}` };
+  awardScore({
+    correct,
+    difficulty: difficulty.value,
+    rtMs,
+    penalty: totalPenalty
+  });
+
+  showFeedback({
+    correct,
+    correctText: "Správne",
+    incorrectText: timedOut ? `Nesprávne - timeout (správne: ${currentPuzzle.value.answer})` : `Nesprávne (správne: ${currentPuzzle.value.answer})`
+  });
 }
 
 function nextPatternRound() {
@@ -331,8 +332,6 @@ function nextPatternRound() {
   }
 
   nextTrial();
-  lastFeedback.value = null;
-
   currentPuzzle.value = generatePuzzle();
   shownAtMs.value = nowMs();
   answered.value = false;
@@ -392,13 +391,16 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
+    score: score.value,
+    bestScore: bestScore.value,
     settings: {
       totalRounds: totalRounds.value,
       ruleComplexity: levelConfig.value.ruleComplexity,
       sequenceLength: levelConfig.value.sequenceLength,
       optionCount: levelConfig.value.optionCount,
       timeLimitMs: levelConfig.value.timeLimitMs,
-      adaptive: true
+      adaptive: true,
+      localScore: true
     }
   })
 );
@@ -410,6 +412,23 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  transition: background-color 0.25s ease;
+}
+
+.flash-ok {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.flash-bad {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.topbar,
+.scorebar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .panel {
@@ -487,13 +506,8 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.hint {
-  color: #555;
-  margin-bottom: 12px;
-}
-
 .feedback {
-  margin-top: 10px;
+  margin-top: 12px;
   padding: 10px 12px;
   border-radius: 10px;
 }
@@ -508,6 +522,11 @@ button:disabled {
   background: #fef2f2;
   color: #991b1b;
   border: 1px solid #fecaca;
+}
+
+.hint {
+  color: #555;
+  margin-bottom: 12px;
 }
 
 .results {

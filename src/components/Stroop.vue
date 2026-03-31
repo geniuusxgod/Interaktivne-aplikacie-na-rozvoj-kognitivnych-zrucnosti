@@ -1,17 +1,33 @@
 <template>
-  <div class="module">
+  <div class="module" :class="flashKind">
     <h2>Stroop Task</h2>
 
-    <div class="panel">
-      <div><b>Kategória:</b> Pozornosť</div>
+    <div class="topbar">
+      <div><b>Kategória:</b> Logické myslenie</div>
       <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
-      <div><b>Incongruent ratio:</b> {{ (levelConfig.incongruentProbability * 100).toFixed(0) }}%</div>
+    </div>
+
+    <div class="scorebar">
+      <div><b>Score:</b> {{ score }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div>
+      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+    </div>
+
+    <div class="panel">
       <div><b>Rule:</b> Choose the <u>ink color</u>, not the written word.</div>
+
+      <div v-if="feedback" class="feedback" :class="feedback.kind">
+        {{ feedback.text }}
+      </div>
+
+      <template v-if="showDebug">
+        <div><b>Success streak:</b> {{ successStreak }}</div>
+        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+        <div><b>Incongruent ratio:</b> {{ (levelConfig.incongruentProbability * 100).toFixed(0) }}%</div>
+      </template>
     </div>
 
     <div class="stimulus-box">
@@ -53,13 +69,12 @@
         <li>Incorrect: {{ summary.incorrect }}</li>
         <li>Timeouts: {{ summary.timeouts }}</li>
         <li>Accuracy: {{ summary.accuracy.toFixed(1) }}%</li>
-        <li>Congruent trials: {{ summary.congruentTrials }}</li>
-        <li>Incongruent trials: {{ summary.incongruentTrials }}</li>
         <li>Congruent accuracy: {{ summary.congruentAccuracy.toFixed(1) }}%</li>
         <li>Incongruent accuracy: {{ summary.incongruentAccuracy.toFixed(1) }}%</li>
         <li>Avg RT: {{ summary.avgRTms === null ? "—" : summary.avgRTms.toFixed(0) + " ms" }}</li>
-        <li>Avg RT (incongruent): {{ summary.avgIncongruentRT === null ? "—" : summary.avgIncongruentRT.toFixed(0) + " ms" }}</li>
         <li>Final difficulty: {{ summary.finalDifficulty }}</li>
+        <li>Final score: {{ score }}</li>
+        <li>Best score: {{ bestScore }}</li>
       </ul>
 
       <details>
@@ -75,6 +90,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
+import { useGameScoring } from "../composables/useGameScoring";
+import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "logic_stroop";
 const CATEGORY = "logicke_myslenie";
@@ -98,35 +115,44 @@ const {
   difficultyLabel,
   successStreak,
   resetDifficulty,
-  updateDifficulty
+  updateDifficulty,
+  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
-  startDifficulty: 2,
-  fastThresholdMs: 700,
-  slowThresholdMs: 2200,
-  targetAccuracyMin: 0.76,
-  targetAccuracyMax: 0.92,
-  windowSize: 6,
-  evaluateEvery: 3,
-  scoreIncreaseThreshold: 80,
-  scoreDecreaseThreshold: 50,
-  maxPendingPenalty: 2
+  startDifficulty: 3,
+  fastThresholdMs: 620,
+  slowThresholdMs: 1800,
+  targetAccuracyMin: 0.72,
+  targetAccuracyMax: 0.88,
+  windowSize: 4,
+  evaluateEvery: 2,
+  scoreIncreaseThreshold: 72,
+  scoreDecreaseThreshold: 42
+});
+
+const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+  fastThresholdMs: 620,
+  slowThresholdMs: 1800
+});
+
+const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
+  durationMs: 750
 });
 
 const totalTrials = ref(24);
 
 const difficultySettings = [
-  { stimulusDurationMs: 4200, isiMs: 700, incongruentProbability: 0.20 },
-  { stimulusDurationMs: 3700, isiMs: 660, incongruentProbability: 0.26 },
-  { stimulusDurationMs: 3300, isiMs: 620, incongruentProbability: 0.34 },
-  { stimulusDurationMs: 2950, isiMs: 580, incongruentProbability: 0.42 },
-  { stimulusDurationMs: 2600, isiMs: 540, incongruentProbability: 0.50 },
-  { stimulusDurationMs: 2250, isiMs: 500, incongruentProbability: 0.58 },
-  { stimulusDurationMs: 1950, isiMs: 460, incongruentProbability: 0.66 },
-  { stimulusDurationMs: 1700, isiMs: 420, incongruentProbability: 0.74 },
-  { stimulusDurationMs: 1450, isiMs: 380, incongruentProbability: 0.80 },
-  { stimulusDurationMs: 1250, isiMs: 340, incongruentProbability: 0.86 }
+  { stimulusDurationMs: 2800, isiMs: 560, incongruentProbability: 0.28 },
+  { stimulusDurationMs: 2500, isiMs: 520, incongruentProbability: 0.36 },
+  { stimulusDurationMs: 2200, isiMs: 480, incongruentProbability: 0.44 },
+  { stimulusDurationMs: 1950, isiMs: 450, incongruentProbability: 0.52 },
+  { stimulusDurationMs: 1700, isiMs: 420, incongruentProbability: 0.60 },
+  { stimulusDurationMs: 1500, isiMs: 390, incongruentProbability: 0.68 },
+  { stimulusDurationMs: 1320, isiMs: 360, incongruentProbability: 0.74 },
+  { stimulusDurationMs: 1160, isiMs: 330, incongruentProbability: 0.80 },
+  { stimulusDurationMs: 1020, isiMs: 300, incongruentProbability: 0.86 },
+  { stimulusDurationMs: 900, isiMs: 270, incongruentProbability: 0.90 }
 ];
 
 const levelConfig = computed(() => {
@@ -166,7 +192,6 @@ function pickDifferentColor(exceptKey) {
 function generateStimulus() {
   const wordColor = randomItem(colorDefs);
   const incongruent = Math.random() < levelConfig.value.incongruentProbability;
-
   const inkColor = incongruent ? pickDifferentColor(wordColor.key) : wordColor;
 
   return {
@@ -182,6 +207,8 @@ function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
+  resetScore();
+  clearFeedback();
 
   currentStimulus.value = null;
   shownAtMs.value = null;
@@ -214,6 +241,7 @@ function finalizeTrial(answerKey = null) {
   const incongruentPenalty = !currentStimulus.value.congruent && !correct ? 0.10 : 0;
   const timeoutPenalty = timedOut ? 0.18 : 0;
   const wrongPenalty = responded && !correct ? 0.14 : 0;
+  const totalPenalty = incongruentPenalty + timeoutPenalty + wrongPenalty;
 
   addResponse({
     trial: trialIndex.value,
@@ -236,7 +264,20 @@ function finalizeTrial(answerKey = null) {
     correct,
     rtMs,
     lapse: timedOut,
-    penalty: incongruentPenalty + timeoutPenalty + wrongPenalty
+    penalty: totalPenalty
+  });
+
+  awardScore({
+    correct,
+    difficulty: difficulty.value,
+    rtMs,
+    penalty: totalPenalty
+  });
+
+  showFeedback({
+    correct,
+    correctText: currentStimulus.value.congruent ? "Správne" : "Správne - incongruent",
+    incorrectText: timedOut ? "Nesprávne - timeout" : !currentStimulus.value.congruent ? "Nesprávne - incongruent" : "Nesprávne"
   });
 }
 
@@ -285,8 +326,7 @@ function submitAnswer(answerKey) {
 }
 
 function onKeydown(e) {
-  if (phase.value !== "running") return;
-  if (answered.value) return;
+  if (phase.value !== "running" || answered.value) return;
 
   const keyMap = {
     Digit1: "red",
@@ -323,8 +363,6 @@ const summary = computed(() => {
   const incongruentCorrect = responses.value.filter(r => !r.congruent && r.correct).length;
 
   const allRTs = responses.value.map(r => r.rtMs).filter(v => v !== null);
-  const incongruentRTs = responses.value.filter(r => !r.congruent && r.rtMs !== null).map(r => r.rtMs);
-
   const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
 
   return {
@@ -332,12 +370,9 @@ const summary = computed(() => {
     incorrect,
     timeouts,
     accuracy: responses.value.length ? (correct / responses.value.length) * 100 : 0,
-    congruentTrials,
-    incongruentTrials,
     congruentAccuracy: congruentTrials ? (congruentCorrect / congruentTrials) * 100 : 0,
     incongruentAccuracy: incongruentTrials ? (incongruentCorrect / incongruentTrials) * 100 : 0,
     avgRTms: avg(allRTs),
-    avgIncongruentRT: avg(incongruentRTs),
     finalDifficulty: difficulty.value
   };
 });
@@ -345,18 +380,15 @@ const summary = computed(() => {
 const payload = computed(() =>
   buildPayload(summary.value, {
     difficulty: difficulty.value,
+    score: score.value,
+    bestScore: bestScore.value,
     settings: {
       totalTrials: totalTrials.value,
       stimulusDurationMs: levelConfig.value.stimulusDurationMs,
       isiMs: levelConfig.value.isiMs,
       incongruentProbability: levelConfig.value.incongruentProbability,
-      answerKeys: {
-        1: "Red",
-        2: "Blue",
-        3: "Green",
-        4: "Yellow"
-      },
-      adaptive: true
+      adaptive: true,
+      localScore: true
     }
   })
 );
@@ -368,6 +400,23 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  transition: background-color 0.25s ease;
+}
+
+.flash-ok {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.flash-bad {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.topbar,
+.scorebar {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .panel {
@@ -423,6 +472,24 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.feedback {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.feedback.ok {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.feedback.bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
 .hint {

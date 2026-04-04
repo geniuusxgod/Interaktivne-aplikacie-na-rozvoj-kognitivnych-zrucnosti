@@ -1,5 +1,5 @@
 <template>
-  <div class="module" :class="flashKind">
+  <div class="module">
     <h2>Visual Search</h2>
 
     <div class="topbar">
@@ -18,10 +18,6 @@
     <div class="panel">
       <div><b>Rule:</b> Find and click the different symbol as quickly as possible.</div>
 
-      <div v-if="feedback" class="feedback" :class="feedback.kind">
-        {{ feedback.text }}
-      </div>
-
       <template v-if="showDebug">
         <div><b>Success streak:</b> {{ successStreak }}</div>
         <div><b>Grid:</b> {{ levelConfig.gridColumns }} x {{ levelConfig.gridRows }}</div>
@@ -32,30 +28,76 @@
       </template>
     </div>
 
-    <div
-      class="search-area"
-      :style="{ gridTemplateColumns: `repeat(${levelConfig.gridColumns}, 70px)` }"
-    >
-      <button
-        v-for="item in currentItems"
-        :key="item.id"
-        class="search-item"
-        :class="{ targetClicked: clicked && item.id === clickedItemId }"
-        :disabled="phase !== 'running' || currentItems.length === 0 || clicked"
-        @click="handleItemClick(item)"
-      >
-        {{ item.symbol }}
-      </button>
-    </div>
+    <div class="game-shell" ref="gameShellRef">
+      <div class="game-shell-header">
+        <div class="game-shell-title-wrap">
+          <div class="game-shell-title">Visual Search</div>
+          <div class="game-shell-subtitle">
+            {{
+              currentItems.length > 0
+                ? "Find the different symbol"
+                : phase === "running"
+                  ? "Wait for the next grid"
+                  : "Ready"
+            }}
+          </div>
+        </div>
 
-    <div class="controls">
-      <button :disabled="phase === 'running'" @click="start">Start</button>
-      <button :disabled="phase !== 'running'" @click="stop">Stop</button>
-      <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
-    </div>
+        <button class="fullscreen-btn" @click="toggleFullscreen">
+          {{ isFullscreen ? "Exit fullscreen" : "Fullscreen" }}
+        </button>
+      </div>
 
-    <div class="hint">
-      Higher levels increase grid density and reduce display time.
+      <div class="game-shell-body">
+        <div class="shell-top-status">
+          <div v-if="combo >= 2" class="combo-badge">
+            🔥 Combo x{{ combo }} • {{ comboMultiplier.toFixed(1) }}x
+          </div>
+        </div>
+
+        <transition name="score-pop">
+          <div
+            v-if="floatingScore"
+            class="floating-score"
+            :class="{ negative: floatingScore.value < 0 }"
+          >
+            {{ floatingScore.value >= 0 ? `+${floatingScore.value}` : floatingScore.value }}
+          </div>
+        </transition>
+
+        <div class="progress">
+          <div
+            class="progress-fill"
+            :style="{ width: `${Math.min(100, (trialIndex / totalTrials) * 100)}%` }"
+          ></div>
+        </div>
+
+        <div
+          class="search-area"
+          :style="{ gridTemplateColumns: `repeat(${levelConfig.gridColumns}, 70px)` }"
+        >
+          <button
+            v-for="item in currentItems"
+            :key="item.id"
+            class="search-item"
+            :class="{ targetClicked: clicked && item.id === clickedItemId }"
+            :disabled="phase !== 'running' || currentItems.length === 0 || clicked"
+            @click="handleItemClick(item)"
+          >
+            {{ item.symbol }}
+          </button>
+        </div>
+
+        <div class="controls controls-centered">
+          <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
+          <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
+          <button class="btn btn-reset" :disabled="phase !== 'finished'" @click="reset">Reset</button>
+        </div>
+
+        <div class="hint hint-centered">
+          Higher levels increase grid density and reduce display time.
+        </div>
+      </div>
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -80,12 +122,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
-import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "perception_visual_search";
 const CATEGORY = "vnimanie";
@@ -130,10 +171,6 @@ const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(M
   slowThresholdMs: 2200
 });
 
-const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
-  durationMs: 750
-});
-
 const totalTrials = ref(18);
 
 const difficultySettings = [
@@ -165,8 +202,39 @@ const clickedAtMs = ref(null);
 const clickedCorrect = ref(false);
 const clickedItemId = ref(null);
 
+const combo = ref(0);
+const comboMultiplier = computed(() => 1 + combo.value * 0.1);
+const floatingScore = ref(null);
+
+const gameShellRef = ref(null);
+const isFullscreen = ref(false);
+
 function nowMs() {
   return performance.now();
+}
+
+function updateCombo(correct) {
+  combo.value = correct ? combo.value + 1 : 0;
+}
+
+function showFloatingScore(value) {
+  floatingScore.value = { value };
+
+  setManagedTimeout(() => {
+    floatingScore.value = null;
+  }, 650);
+}
+
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    await gameShellRef.value?.requestFullscreen();
+  } else {
+    await document.exitFullscreen();
+  }
+}
+
+function handleFullscreenChange() {
+  isFullscreen.value = Boolean(document.fullscreenElement);
 }
 
 function reset() {
@@ -174,7 +242,6 @@ function reset() {
   resetSession();
   resetDifficulty();
   resetScore();
-  clearFeedback();
 
   currentItems.value = [];
   targetId.value = null;
@@ -183,12 +250,16 @@ function reset() {
   clickedAtMs.value = null;
   clickedCorrect.value = false;
   clickedItemId.value = null;
+
+  combo.value = 0;
+  floatingScore.value = null;
 }
 
 function stop() {
   clearAllTimeouts();
   currentItems.value = [];
   targetId.value = null;
+  floatingScore.value = null;
   stopSession();
 }
 
@@ -292,11 +363,8 @@ function finalizeTrial() {
     penalty: wrongClick ? 0.34 : missed ? 0.18 : 0
   });
 
-  showFeedback({
-    correct,
-    correctText: "Správne",
-    incorrectText: wrongClick ? "Nesprávne - wrong click" : "Nesprávne - miss"
-  });
+  updateCombo(correct);
+  showFloatingScore(lastDelta.value);
 }
 
 function nextVisualSearchTrial() {
@@ -345,7 +413,12 @@ function handleItemClick(item) {
   clickedItemId.value = item.id;
 }
 
+onMounted(() => {
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+});
+
 onBeforeUnmount(() => {
+  document.removeEventListener("fullscreenchange", handleFullscreenChange);
   clearAllTimeouts();
 });
 
@@ -385,7 +458,10 @@ const payload = computed(() =>
       gridSize: `${levelConfig.value.gridColumns}x${levelConfig.value.gridRows}`,
       targetMode: levelConfig.value.targetMode,
       adaptive: true,
-      localScore: true
+      localScore: true,
+      fullscreen: true,
+      combo: true,
+      scorePopup: true
     }
   })
 );
@@ -397,15 +473,6 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  transition: background-color 0.25s ease;
-}
-
-.flash-ok {
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.flash-bad {
-  background: rgba(239, 68, 68, 0.08);
 }
 
 .topbar,
@@ -421,29 +488,159 @@ const payload = computed(() =>
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 12px;
+  background: white;
+}
+
+.game-shell {
+  position: relative;
+  background: #0f172a;
+  color: white;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  max-width: 980px;
+  margin: 20px auto;
+}
+
+.game-shell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.game-shell-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-shell-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.game-shell-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.fullscreen-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  cursor: pointer;
+}
+
+.fullscreen-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.game-shell-body {
+  padding: 24px;
+}
+
+.shell-top-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 8px;
+}
+
+.combo-badge {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+}
+
+.floating-score {
+  position: absolute;
+  top: 98px;
+  right: 28px;
+  z-index: 5;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.floating-score.negative {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.score-pop-enter-active,
+.score-pop-leave-active {
+  transition: all 0.35s ease;
+}
+
+.score-pop-enter-from,
+.score-pop-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+}
+
+.progress {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #fb923c);
+  transition: width 0.3s ease;
 }
 
 .search-area {
   display: grid;
   gap: 10px;
   justify-content: center;
-  margin: 16px 0;
+  margin: 16px 0 20px;
   min-height: 340px;
 }
 
 .search-item {
   width: 70px;
   height: 70px;
-  border-radius: 12px;
-  border: 1px solid #ccc;
-  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1e293b;
+  color: white;
   font-size: 28px;
   cursor: pointer;
+  transition: all 0.16s ease;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+}
+
+.search-item:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #273449;
 }
 
 .targetClicked {
   border-color: #60a5fa;
-  background: #dbeafe;
+  background: #1d4ed8;
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.35);
 }
 
 .controls {
@@ -453,12 +650,8 @@ const payload = computed(() =>
   margin-bottom: 12px;
 }
 
-button {
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid #ccc;
-  background: white;
-  cursor: pointer;
+.controls-centered {
+  justify-content: center;
 }
 
 button:disabled {
@@ -466,27 +659,14 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.feedback {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-}
-
-.feedback.ok {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-}
-
-.feedback.bad {
-  background: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
-}
-
 .hint {
   margin-bottom: 12px;
   color: #555;
+}
+
+.hint-centered {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .results {
@@ -502,5 +682,97 @@ button:disabled {
   padding: 12px;
   border-radius: 12px;
   border: 1px solid #eee;
+}
+
+.btn {
+  padding: 12px 18px;
+  border-radius: 14px;
+  border: none;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  color: white;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-start {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.btn-stop {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.btn-reset {
+  background: linear-gradient(135deg, #64748b, #475569);
+}
+
+.game-shell:fullscreen {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  margin: 0;
+  background: #020617;
+}
+
+.game-shell:fullscreen .game-shell-body {
+  height: calc(100vh - 73px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  overflow-y: auto;
+  padding: 24px 20px 28px;
+  gap: 10px;
+}
+
+.game-shell:fullscreen .search-area {
+  flex: 1;
+  align-content: center;
+}
+
+.game-shell:fullscreen .game-shell-title {
+  font-size: 26px;
+}
+
+.game-shell:fullscreen .controls button,
+.game-shell:fullscreen .fullscreen-btn {
+  font-size: 16px;
+  padding: 12px 18px;
+}
+
+.game-shell:fullscreen .floating-score {
+  top: 110px;
+  right: 34px;
+  font-size: 20px;
+  padding: 12px 16px;
+}
+
+.game-shell:fullscreen .combo-badge {
+  font-size: 15px;
+}
+
+.game-shell:fullscreen .search-item {
+  width: 76px;
+  height: 76px;
+  font-size: 32px;
 }
 </style>

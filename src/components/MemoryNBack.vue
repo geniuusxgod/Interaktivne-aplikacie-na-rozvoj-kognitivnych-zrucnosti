@@ -1,11 +1,12 @@
 <template>
-  <div class="module" :class="flashKind">
+  <div class="module">
     <h2>Memory N-Back</h2>
 
     <div class="topbar">
       <div><b>Kategória:</b> Pamäť</div>
+      <div><b>Status:</b> {{ phase }}</div>
       <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>N:</b> {{ levelConfig.n }}</div>
+      <div><b>N:</b> {{ selectedN }}</div>
       <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
       <div><b>Block:</b> {{ currentBlockIndex }} / {{ totalBlocks }}</div>
     </div>
@@ -17,29 +18,99 @@
     </div>
 
     <div class="panel">
-      <div><b>Status:</b> {{ phase }}</div>
-      <div><b>Success streak:</b> {{ successStreak }}</div>
-      <div><b>Stimulus:</b> <span class="stimulus">{{ currentStimulus ?? "—" }}</span></div>
+      <div><b>Rule:</b> Press <b>Space</b> or click <b>Match</b> when the current stimulus matches the one {{ selectedN }} step(s) back.</div>
 
-      <div class="hint">
-        Press <b>Space</b> or click <b>Match</b> when the current stimulus matches the one {{ levelConfig.n }} step(s) back.
-      </div>
-
-      <div v-if="feedback" class="feedback" :class="feedback.kind">
-        {{ feedback.text }}
-      </div>
+      <template v-if="showDebug">
+        <div><b>Success streak:</b> {{ successStreak }}</div>
+        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+      </template>
     </div>
 
-    <div class="controls">
-      <button :disabled="phase === 'running'" @click="start">Start</button>
-      <button :disabled="phase !== 'running'" @click="stop">Stop</button>
-      <button :disabled="phase !== 'running'" @click="registerResponse">Match</button>
-      <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
-    </div>
+    <div class="game-shell" ref="gameShellRef">
+      <div class="game-shell-header">
+        <div class="game-shell-title-wrap">
+          <div class="game-shell-title">Memory N-Back</div>
+          <div class="game-shell-subtitle">
+            {{
+              currentStimulus !== null
+                ? `Match if equal to ${selectedN}-back`
+                : phase === "running"
+                  ? "Wait for the next stimulus"
+                  : "Ready"
+            }}
+          </div>
+        </div>
 
-    <div v-if="showDebug" class="debug">
-      <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-      <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+        <button class="fullscreen-btn" @click="toggleFullscreen">
+          {{ isFullscreen ? "Exit fullscreen" : "Fullscreen" }}
+        </button>
+      </div>
+
+      <div class="game-shell-body">
+        <div class="shell-top-status">
+          <div v-if="combo >= 2" class="combo-badge">
+            🔥 Combo x{{ combo }} • {{ comboMultiplier.toFixed(1) }}x
+          </div>
+        </div>
+
+        <transition name="score-pop">
+          <div
+            v-if="floatingScore"
+            class="floating-score"
+            :class="{ negative: floatingScore.value < 0 }"
+          >
+            {{ floatingScore.value >= 0 ? `+${floatingScore.value}` : floatingScore.value }}
+          </div>
+        </transition>
+
+        <div class="progress">
+          <div
+            class="progress-fill"
+            :style="{ width: `${Math.min(100, (trialIndex / totalTrials) * 100)}%` }"
+          ></div>
+        </div>
+
+        <div class="mode-row">
+          <label class="select select-dark">
+            N level:
+            <select v-model.number="selectedN" :disabled="phase === 'running'">
+              <option v-for="n in nOptions" :key="n" :value="n">{{ n }}-Back</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="stimulusBox">
+          <div class="stimulus">
+            {{ currentStimulus ?? "—" }}
+          </div>
+
+          <div class="subhint subhint-dark">
+            {{
+              phase === "running"
+                ? `Press Match if current letter equals the one ${selectedN} step(s) back.`
+                : "Press Start."
+            }}
+          </div>
+        </div>
+
+        <div class="controls controls-centered">
+          <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
+          <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
+          <button class="btn btn-match" :disabled="phase !== 'running'" @click="registerResponse">Match</button>
+          <button class="btn btn-reset" :disabled="phase !== 'finished'" @click="reset">Reset</button>
+        </div>
+
+        <div v-if="showDebug" class="debug debug-dark">
+          <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
+          <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
+          <div><b>N:</b> {{ selectedN }}</div>
+        </div>
+
+        <div class="hint hint-centered">
+          Difficulty changes speed only. N is selected manually.
+        </div>
+      </div>
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -71,7 +142,6 @@ import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
-import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "memory_nback";
 const CATEGORY = "pamat";
@@ -116,24 +186,23 @@ const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(M
   slowThresholdMs: 1300
 });
 
-const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
-  durationMs: 700
-});
-
 const totalTrials = ref(30);
 const blockSize = ref(5);
 
+const nOptions = [1, 2, 3, 4];
+const selectedN = ref(2);
+
 const difficultySettings = [
-  { n: 1, stimulusDurationMs: 980, isiMs: 560 },
-  { n: 2, stimulusDurationMs: 900, isiMs: 520 },
-  { n: 2, stimulusDurationMs: 820, isiMs: 480 },
-  { n: 2, stimulusDurationMs: 740, isiMs: 440 },
-  { n: 3, stimulusDurationMs: 680, isiMs: 410 },
-  { n: 3, stimulusDurationMs: 620, isiMs: 380 },
-  { n: 3, stimulusDurationMs: 570, isiMs: 350 },
-  { n: 4, stimulusDurationMs: 530, isiMs: 320 },
-  { n: 4, stimulusDurationMs: 490, isiMs: 300 },
-  { n: 4, stimulusDurationMs: 450, isiMs: 280 }
+  { stimulusDurationMs: 980, isiMs: 560 },
+  { stimulusDurationMs: 900, isiMs: 520 },
+  { stimulusDurationMs: 820, isiMs: 480 },
+  { stimulusDurationMs: 740, isiMs: 440 },
+  { stimulusDurationMs: 680, isiMs: 410 },
+  { stimulusDurationMs: 620, isiMs: 380 },
+  { stimulusDurationMs: 570, isiMs: 350 },
+  { stimulusDurationMs: 530, isiMs: 320 },
+  { stimulusDurationMs: 490, isiMs: 300 },
+  { stimulusDurationMs: 450, isiMs: 280 }
 ];
 
 const levelConfig = computed(() => {
@@ -153,6 +222,13 @@ const currentTrialResponseAtMs = ref(null);
 const currentBlockIndex = ref(1);
 const totalBlocks = computed(() => Math.ceil(totalTrials.value / blockSize.value));
 
+const combo = ref(0);
+const comboMultiplier = computed(() => 1 + combo.value * 0.1);
+const floatingScore = ref(null);
+
+const gameShellRef = ref(null);
+const isFullscreen = ref(false);
+
 function nowMs() {
   return performance.now();
 }
@@ -164,7 +240,7 @@ function randomStimulus() {
 
 function buildStimulusForTrial(trialNumber1Based) {
   const index = trialNumber1Based - 1;
-  const n = levelConfig.value.n;
+  const n = selectedN.value;
 
   if (index >= n && Math.random() < 0.35) {
     return sequence.value[index - n];
@@ -179,11 +255,34 @@ function buildStimulusForTrial(trialNumber1Based) {
   return candidate;
 }
 
-function computeIsTarget(stimulus, trialNumber1Based, n) {
+function computeIsTarget(stimulus, trialNumber1Based) {
   const idx = trialNumber1Based - 1;
-  const backIdx = idx - n;
+  const backIdx = idx - selectedN.value;
   if (backIdx < 0) return false;
   return sequence.value[backIdx] === stimulus;
+}
+
+function updateCombo(correct) {
+  combo.value = correct ? combo.value + 1 : 0;
+}
+
+function showFloatingScore(value) {
+  floatingScore.value = { value };
+  setManagedTimeout(() => {
+    floatingScore.value = null;
+  }, 650);
+}
+
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    await gameShellRef.value?.requestFullscreen();
+  } else {
+    await document.exitFullscreen();
+  }
+}
+
+function handleFullscreenChange() {
+  isFullscreen.value = Boolean(document.fullscreenElement);
 }
 
 function reset() {
@@ -191,7 +290,6 @@ function reset() {
   resetSession();
   resetDifficulty();
   resetScore();
-  clearFeedback();
 
   currentStimulus.value = null;
   sequence.value = [];
@@ -199,11 +297,15 @@ function reset() {
   currentTrialResponded.value = false;
   currentTrialResponseAtMs.value = null;
   currentBlockIndex.value = 1;
+
+  combo.value = 0;
+  floatingScore.value = null;
 }
 
 function stop() {
   clearAllTimeouts();
   currentStimulus.value = null;
+  floatingScore.value = null;
   stopSession();
 }
 
@@ -219,7 +321,7 @@ function finalizeTrial(trialNumber1Based) {
 
   if (stimulus === null || shownAt === null) return;
 
-  const isTarget = computeIsTarget(stimulus, trialNumber1Based, levelConfig.value.n);
+  const isTarget = computeIsTarget(stimulus, trialNumber1Based);
   const userPressed = currentTrialResponded.value;
   const correct = (isTarget && userPressed) || (!isTarget && !userPressed);
 
@@ -234,7 +336,7 @@ function finalizeTrial(trialNumber1Based) {
   addResponse({
     trial: trialNumber1Based,
     stimulus,
-    n: levelConfig.value.n,
+    n: selectedN.value,
     difficulty: difficulty.value,
     isTarget,
     userPressed,
@@ -253,11 +355,8 @@ function finalizeTrial(trialNumber1Based) {
     penalty: falseAlarm ? 0.4 : miss ? 0.28 : 0
   });
 
-  showFeedback({
-    correct,
-    correctText: "Správne",
-    incorrectText: falseAlarm ? "Nesprávne - false alarm" : miss ? "Nesprávne - miss" : "Nesprávne"
-  });
+  updateCombo(correct);
+  showFloatingScore(lastDelta.value);
 }
 
 function evaluateCurrentBlock() {
@@ -344,10 +443,12 @@ function onKeydown(e) {
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
+  document.removeEventListener("fullscreenchange", handleFullscreenChange);
   clearAllTimeouts();
 });
 
@@ -397,11 +498,14 @@ const payload = computed(() =>
     settings: {
       totalTrials: totalTrials.value,
       blockSize: blockSize.value,
-      n: levelConfig.value.n,
+      n: selectedN.value,
       stimulusDurationMs: levelConfig.value.stimulusDurationMs,
       isiMs: levelConfig.value.isiMs,
       adaptive: true,
-      localScore: true
+      localScore: true,
+      fullscreen: true,
+      combo: true,
+      scorePopup: true
     }
   })
 );
@@ -409,19 +513,10 @@ const payload = computed(() =>
 
 <style scoped>
 .module {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  transition: background-color 0.25s ease;
-}
-
-.flash-ok {
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.flash-bad {
-  background: rgba(239, 68, 68, 0.08);
 }
 
 .topbar,
@@ -437,18 +532,185 @@ const payload = computed(() =>
   border-radius: 12px;
   padding: 12px;
   margin: 12px 0;
+  background: white;
 }
 
-.stimulus {
-  font-size: 28px;
-  display: inline-block;
-  min-width: 24px;
+.game-shell {
+  position: relative;
+  background: #0f172a;
+  color: white;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  max-width: 980px;
+  margin: 20px auto;
+}
+
+.game-shell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.game-shell-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-shell-title {
+  font-size: 22px;
   font-weight: 700;
 }
 
-.hint {
-  margin-top: 8px;
-  opacity: 0.8;
+.game-shell-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.fullscreen-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  cursor: pointer;
+}
+
+.fullscreen-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.game-shell-body {
+  padding: 24px;
+}
+
+.shell-top-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 8px;
+}
+
+.combo-badge {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+}
+
+.floating-score {
+  position: absolute;
+  top: 98px;
+  right: 28px;
+  z-index: 5;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.floating-score.negative {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.score-pop-enter-active,
+.score-pop-leave-active {
+  transition: all 0.35s ease;
+}
+
+.score-pop-enter-from,
+.score-pop-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+}
+
+.progress {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #fb923c);
+  transition: width 0.3s ease;
+}
+
+.mode-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.select {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.select-dark {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+.select-dark select {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
+.select-dark option {
+  color: black;
+}
+
+.stimulusBox {
+  margin-top: 4px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 18px;
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.stimulus {
+  font-size: 72px;
+  display: inline-block;
+  min-width: 40px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.subhint {
+  margin-top: 6px;
+}
+
+.subhint-dark {
+  color: rgba(255, 255, 255, 0.68);
+  text-align: center;
 }
 
 .controls {
@@ -458,45 +720,38 @@ const payload = computed(() =>
   margin: 12px 0;
 }
 
-button {
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid #ccc;
-  background: #fff;
-  cursor: pointer;
+.controls-centered {
+  justify-content: center;
 }
 
-button:disabled {
+button:disabled,
+select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.feedback {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-}
-
-.feedback.ok {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-}
-
-.feedback.bad {
-  background: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
 }
 
 .debug {
   margin-top: 12px;
   padding: 12px;
-  border: 1px dashed #ccc;
   border-radius: 12px;
   display: grid;
   gap: 6px;
-  background: #fafafa;
+}
+
+.debug-dark {
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.hint {
+  margin-top: 8px;
+  opacity: 0.8;
+}
+
+.hint-centered {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .results {
@@ -512,5 +767,101 @@ button:disabled {
   padding: 12px;
   border-radius: 12px;
   border: 1px solid #eee;
+}
+
+.btn {
+  padding: 12px 18px;
+  border-radius: 14px;
+  border: none;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  color: white;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-start {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.btn-stop {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.btn-reset {
+  background: linear-gradient(135deg, #64748b, #475569);
+}
+
+.btn-match {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+}
+
+.game-shell:fullscreen {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  margin: 0;
+  background: #020617;
+}
+
+.game-shell:fullscreen .game-shell-body {
+  height: calc(100vh - 73px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  overflow-y: auto;
+  padding: 24px 20px 28px;
+  gap: 10px;
+}
+
+.game-shell:fullscreen .stimulusBox {
+  flex: 1;
+  width: 100%;
+  max-width: 900px;
+}
+
+.game-shell:fullscreen .game-shell-title {
+  font-size: 26px;
+}
+
+.game-shell:fullscreen .controls button,
+.game-shell:fullscreen .fullscreen-btn,
+.game-shell:fullscreen .select-dark select {
+  font-size: 16px;
+  padding: 12px 18px;
+}
+
+.game-shell:fullscreen .floating-score {
+  top: 110px;
+  right: 34px;
+  font-size: 20px;
+  padding: 12px 16px;
+}
+
+.game-shell:fullscreen .combo-badge {
+  font-size: 15px;
+}
+
+.game-shell:fullscreen .stimulus {
+  font-size: 96px;
 }
 </style>

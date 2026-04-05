@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Digit Span</h2>
+    <p class="module-description">
+      <b>Rule: </b>V tejto miniaplikácii sa používateľovi postupne zobrazí séria číslic, ktoré si musí zapamätať. Po skončení prezentácie ich má zadať v správnom poradí, prípadne v opačnom poradí podľa zvoleného režimu, čím sa precvičuje krátkodobá a pracovná pamäť.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Pamäť</div>
@@ -15,7 +18,7 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
+    <!-- <div class="panel">
       <div><b>Rule:</b> Memorize the digits and repeat them in the selected mode.</div>
 
       <template v-if="showDebug">
@@ -24,7 +27,7 @@
         <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
         <div><b>Success streak:</b> {{ successStreak }}</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -829,5 +832,14 @@ input:disabled {
 
 .game-shell:fullscreen .stimulus {
   font-size: 72px;
+}
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

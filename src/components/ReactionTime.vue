@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Reaction Time Grid</h2>
+    <p class="module-description">
+      <b>Rule: </b>V mriežke sa vždy zvýrazní jedno políčko a používateľ musí naň čo najrýchlejšie kliknúť. Cieľom je presne reagovať na vizuálny podnet v krátkom čase, pričom vyššia obtiažnosť zrýchľuje tempo a zvyšuje nároky na postreh.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Vnímanie</div>
@@ -15,8 +18,8 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
-      <div><b>Rule:</b> Click the highlighted cell as quickly as possible.</div>
+    <!-- <div class="panel">
+       <div><b>Rule:</b> Click the highlighted cell as quickly as possible.</div>
 
       <template v-if="showDebug">
         <div><b>Success streak:</b> {{ successStreak }}</div>
@@ -24,7 +27,7 @@
         <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
         <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -694,5 +697,15 @@ button:disabled {
   width: 76px;
   height: 76px;
   font-size: 16px;
+}
+
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

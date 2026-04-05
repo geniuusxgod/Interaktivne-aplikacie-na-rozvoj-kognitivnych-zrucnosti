@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Memory N-Back</h2>
+    <p class="module-description">
+      <b>Rule: </b>V tejto úlohe sa postupne zobrazujú symboly a tvojou úlohou je označiť zhodu vtedy, keď sa aktuálny symbol zhoduje so symbolom, ktorý sa zobrazil o <b>{{ selectedN }}</b> kroky späť. Používateľ musí priebežne sledovať celú sériu podnetov, porovnávať ich s predchádzajúcimi a reagovať iba v správnom okamihu.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Pamäť</div>
@@ -17,7 +20,7 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
+    <!-- <div class="panel">
       <div><b>Rule:</b> Press <b>Space</b> or click <b>Match</b> when the current stimulus matches the one {{ selectedN }} step(s) back.</div>
 
       <template v-if="showDebug">
@@ -25,7 +28,7 @@
         <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
         <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -863,5 +866,14 @@ select:disabled {
 
 .game-shell:fullscreen .stimulus {
   font-size: 96px;
+}
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

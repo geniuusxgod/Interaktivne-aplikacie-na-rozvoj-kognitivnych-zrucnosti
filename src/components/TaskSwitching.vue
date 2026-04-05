@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Task Switching</h2>
+    <p class="module-description">
+      <b>Rule: </b>V tejto úlohe sa pravidlo odpovede mení podľa farby rámu okolo podnetu: pri modrom ráme sa vyberá <b>farba</b> objektu a pri zelenom ráme sa vyberá jeho <b>tvar</b>. Používateľ preto musí pred každou odpoveďou najprv zistiť, ktoré pravidlo práve platí, a potom správne reagovať, čo precvičuje mentálnu flexibilitu a prepínanie medzi úlohami.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Logické myslenie</div>
@@ -15,7 +18,7 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
+    <!-- <div class="panel">
       <div><b>Rule:</b></div>
       <div>Blue frame → choose <b>color</b></div>
       <div>Green frame → choose <b>shape</b></div>
@@ -26,7 +29,7 @@
         <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
         <div><b>Switch probability:</b> {{ (levelConfig.switchProbability * 100).toFixed(0) }}%</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -855,5 +858,14 @@ button:disabled {
 
 .game-shell:fullscreen .stimulus-meta {
   font-size: 18px;
+}
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

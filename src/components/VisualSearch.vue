@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Visual Search</h2>
+    <p class="module-description">
+      <b>Rule: </b>Na obrazovke sa zobrazí skupina veľmi podobných symbolov, z ktorých jeden sa od ostatných odlišuje. Používateľ má tento odlišný prvok čo najrýchlejšie nájsť a označiť, čím sa precvičuje vizuálne vyhľadávanie a koncentrácia na detail.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Vnímanie</div>
@@ -15,7 +18,7 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
+    <!-- <div class="panel">
       <div><b>Rule:</b> Find and click the different symbol as quickly as possible.</div>
 
       <template v-if="showDebug">
@@ -26,7 +29,7 @@
         <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
         <div><b>Target mode:</b> {{ levelConfig.targetMode }}</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -774,5 +777,14 @@ button:disabled {
   width: 76px;
   height: 76px;
   font-size: 32px;
+}
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

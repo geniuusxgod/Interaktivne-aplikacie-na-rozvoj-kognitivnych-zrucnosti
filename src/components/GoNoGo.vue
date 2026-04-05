@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Go / No-Go Task</h2>
+    <p class="module-description">
+      <b>Rule: </b>Na obrazovke sa rýchlo striedajú podnety a používateľ má reagovať iba na tie, ktoré patria do kategórie <b>GO</b>. Ak sa zobrazí <b>NO-GO</b> podnet, nesmie stlačiť nič, takže úloha preveruje pozornosť, rýchlosť reakcie a schopnosť potlačiť impulzívnu odpoveď.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Pozornosť</div>
@@ -15,7 +18,7 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
+    <!-- <div class="panel">
       <div><b>Rule:</b> Press only for <u>GO</u> stimulus.</div>
 
       <template v-if="showDebug">
@@ -24,7 +27,7 @@
         <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
         <div><b>NO-GO ratio:</b> {{ (levelConfig.noGoProbability * 100).toFixed(0) }}%</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -826,5 +829,14 @@ button:disabled {
 
 .btn-press:active {
   transform: scale(0.92);
+}
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

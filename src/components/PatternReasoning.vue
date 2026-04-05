@@ -1,6 +1,9 @@
 <template>
   <div class="module">
     <h2>Pattern Reasoning</h2>
+    <p class="module-description">
+      <b>Rule: </b>Používateľ sleduje postupnosť symbolov alebo tvarov, v ktorej chýba ďalší správny prvok. Jeho úlohou je rozpoznať pravidlo v sekvencii a z ponúknutých možností vybrať správne pokračovanie, takže ide o cvičenie logického uvažovania a práce so vzormi.
+    </p>
 
     <div class="topbar">
       <div><b>Kategória:</b> Logické myslenie</div>
@@ -15,7 +18,7 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <div class="panel">
+    <!-- <div class="panel">
       <div><b>Rule:</b> Choose the missing next symbol in the sequence.</div>
 
       <template v-if="showDebug">
@@ -25,7 +28,7 @@
         <div><b>Options:</b> {{ levelConfig.optionCount }}</div>
         <div><b>Time limit:</b> {{ levelConfig.timeLimitMs }} ms</div>
       </template>
-    </div>
+    </div> -->
 
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
@@ -836,5 +839,14 @@ button:disabled {
 
 .game-shell:fullscreen .combo-badge {
   font-size: 15px;
+}
+.module-description {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

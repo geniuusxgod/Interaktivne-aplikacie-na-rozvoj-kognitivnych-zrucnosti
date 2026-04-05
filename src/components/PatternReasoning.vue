@@ -1,5 +1,5 @@
 <template>
-  <div class="module" :class="flashKind">
+  <div class="module">
     <h2>Pattern Reasoning</h2>
 
     <div class="topbar">
@@ -18,10 +18,6 @@
     <div class="panel">
       <div><b>Rule:</b> Choose the missing next symbol in the sequence.</div>
 
-      <div v-if="feedback" class="feedback" :class="feedback.kind">
-        {{ feedback.text }}
-      </div>
-
       <template v-if="showDebug">
         <div><b>Success streak:</b> {{ successStreak }}</div>
         <div><b>Rule complexity:</b> {{ levelConfig.ruleComplexity }}</div>
@@ -31,39 +27,86 @@
       </template>
     </div>
 
-    <div class="sequence-box">
-      <div v-if="currentPuzzle" class="sequence">
-        <div
-          v-for="(item, idx) in currentPuzzle.sequence"
-          :key="idx"
-          class="sequence-item"
-        >
-          {{ item }}
+    <div class="game-shell" ref="gameShellRef">
+      <div class="game-shell-header">
+        <div class="game-shell-title-wrap">
+          <div class="game-shell-title">Pattern Reasoning</div>
+          <div class="game-shell-subtitle">
+            {{
+              currentPuzzle
+                ? "Choose the missing symbol"
+                : phase === "running"
+                  ? "Wait for the next pattern"
+                  : "Ready"
+            }}
+          </div>
         </div>
-        <div class="sequence-item missing">?</div>
+
+        <button class="fullscreen-btn" @click="toggleFullscreen">
+          {{ isFullscreen ? "Exit fullscreen" : "Fullscreen" }}
+        </button>
       </div>
-      <div v-else class="placeholder">—</div>
-    </div>
 
-    <div class="options" v-if="currentPuzzle">
-      <button
-        v-for="option in currentPuzzle.options"
-        :key="option.id"
-        :disabled="phase !== 'running' || answered"
-        @click="submitAnswer(option.value)"
-      >
-        {{ option.value }}
-      </button>
-    </div>
+      <div class="game-shell-body">
+        <div class="shell-top-status">
+          <div v-if="combo >= 2" class="combo-badge">
+            🔥 Combo x{{ combo }} • {{ comboMultiplier.toFixed(1) }}x
+          </div>
+        </div>
 
-    <div class="controls">
-      <button :disabled="phase === 'running'" @click="start">Start</button>
-      <button :disabled="phase !== 'running'" @click="stop">Stop</button>
-      <button :disabled="phase !== 'finished'" @click="reset">Reset</button>
-    </div>
+        <transition name="score-pop">
+          <div
+            v-if="floatingScore"
+            class="floating-score"
+            :class="{ negative: floatingScore.value < 0 }"
+          >
+            {{ floatingScore.value >= 0 ? `+${floatingScore.value}` : floatingScore.value }}
+          </div>
+        </transition>
 
-    <div class="hint">
-      Difficulty rises by increasing pattern complexity, distractors, and time pressure.
+        <div class="progress">
+          <div
+            class="progress-fill"
+            :style="{ width: `${Math.min(100, (trialIndex / totalRounds) * 100)}%` }"
+          ></div>
+        </div>
+
+        <div class="sequence-box">
+          <div v-if="currentPuzzle" class="sequence">
+            <div
+              v-for="(item, idx) in currentPuzzle.sequence"
+              :key="idx"
+              class="sequence-item"
+            >
+              {{ item }}
+            </div>
+            <div class="sequence-item missing">?</div>
+          </div>
+          <div v-else class="placeholder">—</div>
+        </div>
+
+        <div class="options" v-if="currentPuzzle">
+          <button
+            v-for="option in currentPuzzle.options"
+            :key="option.id"
+            class="option-btn"
+            :disabled="phase !== 'running' || answered"
+            @click="submitAnswer(option.value)"
+          >
+            {{ option.value }}
+          </button>
+        </div>
+
+        <div class="controls controls-centered">
+          <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
+          <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
+          <button class="btn btn-reset" :disabled="phase !== 'finished'" @click="reset">Reset</button>
+        </div>
+
+        <div class="hint hint-centered">
+          Difficulty rises by increasing pattern complexity, distractors, and time pressure.
+        </div>
+      </div>
     </div>
 
     <div v-if="phase === 'finished'" class="results">
@@ -88,12 +131,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
-import { useInstantFeedback } from "../composables/useInstantFeedback";
 
 const MODULE_ID = "logic_pattern_reasoning";
 const CATEGORY = "logicke_myslenie";
@@ -138,10 +180,6 @@ const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(M
   slowThresholdMs: 6000
 });
 
-const { feedback, flashKind, showFeedback, clearFeedback } = useInstantFeedback({
-  durationMs: 900
-});
-
 const totalRounds = ref(14);
 
 const difficultySettings = [
@@ -168,6 +206,13 @@ const currentPuzzle = ref(null);
 const shownAtMs = ref(null);
 const answered = ref(false);
 const answeredAtMs = ref(null);
+
+const combo = ref(0);
+const comboMultiplier = computed(() => 1 + combo.value * 0.1);
+const floatingScore = ref(null);
+
+const gameShellRef = ref(null);
+const isFullscreen = ref(false);
 
 function nowMs() {
   return performance.now();
@@ -244,22 +289,49 @@ function generatePuzzle() {
   return { ...base, options };
 }
 
+function updateCombo(correct) {
+  combo.value = correct ? combo.value + 1 : 0;
+}
+
+function showFloatingScore(value) {
+  floatingScore.value = { value };
+
+  setManagedTimeout(() => {
+    floatingScore.value = null;
+  }, 650);
+}
+
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    await gameShellRef.value?.requestFullscreen();
+  } else {
+    await document.exitFullscreen();
+  }
+}
+
+function handleFullscreenChange() {
+  isFullscreen.value = Boolean(document.fullscreenElement);
+}
+
 function reset() {
   clearAllTimeouts();
   resetSession();
   resetDifficulty();
   resetScore();
-  clearFeedback();
 
   currentPuzzle.value = null;
   shownAtMs.value = null;
   answered.value = false;
   answeredAtMs.value = null;
+
+  combo.value = 0;
+  floatingScore.value = null;
 }
 
 function stop() {
   clearAllTimeouts();
   currentPuzzle.value = null;
+  floatingScore.value = null;
   stopSession();
 }
 
@@ -315,11 +387,8 @@ function finalizeRound(answerValue = null) {
     penalty: totalPenalty
   });
 
-  showFeedback({
-    correct,
-    correctText: "Správne",
-    incorrectText: timedOut ? `Nesprávne - timeout (správne: ${currentPuzzle.value.answer})` : `Nesprávne (správne: ${currentPuzzle.value.answer})`
-  });
+  updateCombo(correct);
+  showFloatingScore(lastDelta.value);
 }
 
 function nextPatternRound() {
@@ -366,7 +435,12 @@ function submitAnswer(answerValue) {
   }, 700);
 }
 
+onMounted(() => {
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+});
+
 onBeforeUnmount(() => {
+  document.removeEventListener("fullscreenchange", handleFullscreenChange);
   clearAllTimeouts();
 });
 
@@ -400,7 +474,10 @@ const payload = computed(() =>
       optionCount: levelConfig.value.optionCount,
       timeLimitMs: levelConfig.value.timeLimitMs,
       adaptive: true,
-      localScore: true
+      localScore: true,
+      fullscreen: true,
+      combo: true,
+      scorePopup: true
     }
   })
 );
@@ -412,15 +489,6 @@ const payload = computed(() =>
   margin: 0 auto;
   padding: 16px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  transition: background-color 0.25s ease;
-}
-
-.flash-ok {
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.flash-bad {
-  background: rgba(239, 68, 68, 0.08);
 }
 
 .topbar,
@@ -436,16 +504,137 @@ const payload = computed(() =>
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 12px;
+  background: white;
+}
+
+.game-shell {
+  position: relative;
+  background: #0f172a;
+  color: white;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  max-width: 980px;
+  margin: 20px auto;
+}
+
+.game-shell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.game-shell-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-shell-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.game-shell-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.fullscreen-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  cursor: pointer;
+}
+
+.fullscreen-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.game-shell-body {
+  padding: 24px;
+}
+
+.shell-top-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 8px;
+}
+
+.combo-badge {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+}
+
+.floating-score {
+  position: absolute;
+  top: 98px;
+  right: 28px;
+  z-index: 5;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.floating-score.negative {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.score-pop-enter-active,
+.score-pop-leave-active {
+  transition: all 0.35s ease;
+}
+
+.score-pop-enter-from,
+.score-pop-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+}
+
+.progress {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #fb923c);
+  transition: width 0.3s ease;
 }
 
 .sequence-box {
   min-height: 150px;
-  border: 1px dashed #ccc;
-  border-radius: 12px;
-  background: #fafafa;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
   display: grid;
   place-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   padding: 16px;
 }
 
@@ -459,31 +648,53 @@ const payload = computed(() =>
 .sequence-item {
   width: 70px;
   height: 70px;
-  border-radius: 12px;
-  border: 1px solid #ccc;
-  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1e293b;
   display: grid;
   place-items: center;
   font-size: 28px;
   font-weight: 700;
+  color: white;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
 .sequence-item.missing {
-  background: #e0f2fe;
-  border-color: #7dd3fc;
+  background: #1d4ed8;
+  border-color: rgba(96, 165, 250, 0.55);
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.18);
 }
 
 .placeholder {
   font-size: 42px;
-  color: #999;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .options {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   justify-content: center;
+}
+
+.option-btn {
+  min-width: 70px;
+  min-height: 70px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 24px;
+  transition: all 0.18s ease;
+}
+
+.option-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .controls {
@@ -493,12 +704,8 @@ const payload = computed(() =>
   margin-bottom: 12px;
 }
 
-button {
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid #ccc;
-  background: white;
-  cursor: pointer;
+.controls-centered {
+  justify-content: center;
 }
 
 button:disabled {
@@ -506,27 +713,14 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.feedback {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-}
-
-.feedback.ok {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-}
-
-.feedback.bad {
-  background: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
-}
-
 .hint {
   color: #555;
   margin-bottom: 12px;
+}
+
+.hint-centered {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .results {
@@ -542,5 +736,105 @@ button:disabled {
   padding: 12px;
   border-radius: 12px;
   border: 1px solid #eee;
+}
+
+.btn {
+  padding: 12px 18px;
+  border-radius: 14px;
+  border: none;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  color: white;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-start {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.btn-stop {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.btn-reset {
+  background: linear-gradient(135deg, #64748b, #475569);
+}
+
+.game-shell:fullscreen {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  margin: 0;
+  background: #020617;
+}
+
+.game-shell:fullscreen .game-shell-body {
+  height: calc(100vh - 73px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  overflow-y: auto;
+  padding: 24px 20px 28px;
+  gap: 10px;
+}
+
+.game-shell:fullscreen .sequence-box {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+}
+
+.game-shell:fullscreen .game-shell-title {
+  font-size: 26px;
+}
+
+.game-shell:fullscreen .controls button,
+.game-shell:fullscreen .fullscreen-btn,
+.game-shell:fullscreen .option-btn {
+  font-size: 16px;
+  padding: 12px 18px;
+}
+
+.game-shell:fullscreen .option-btn {
+  min-width: 84px;
+  min-height: 84px;
+  font-size: 28px;
+}
+
+.game-shell:fullscreen .sequence-item {
+  width: 84px;
+  height: 84px;
+  font-size: 32px;
+}
+
+.game-shell:fullscreen .floating-score {
+  top: 110px;
+  right: 34px;
+  font-size: 20px;
+  padding: 12px 16px;
+}
+
+.game-shell:fullscreen .combo-badge {
+  font-size: 15px;
 }
 </style>

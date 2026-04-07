@@ -18,17 +18,6 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <!-- <div class="panel">
-      <div><b>Rule:</b> Press only for <u>GO</u> stimulus.</div>
-
-      <template v-if="showDebug">
-        <div><b>Success streak:</b> {{ successStreak }}</div>
-        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
-        <div><b>NO-GO ratio:</b> {{ (levelConfig.noGoProbability * 100).toFixed(0) }}%</div>
-      </template>
-    </div> -->
-
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
         <div class="game-shell-title-wrap">
@@ -102,24 +91,22 @@
         <li>Final score: {{ score }}</li>
         <li>Best score: {{ bestScore }}</li>
       </ul>
-
-      <details>
-        <summary>Payload</summary>
-        <pre class="pre">{{ payload }}</pre>
-      </details>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
+import { auth } from "../firebase";
+import { getUserGameStat, saveAttempt } from "../services/gameResultsService";
 
 const MODULE_ID = "attention_go_no_go";
 const CATEGORY = "pozornost";
+const GAME_KEY = "gonogo";
 
 const {
   phase,
@@ -129,8 +116,7 @@ const {
   stopSession,
   resetSession,
   nextTrial,
-  addResponse,
-  buildPayload
+  addResponse
 } = useGameSession(MODULE_ID, CATEGORY);
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
@@ -156,7 +142,7 @@ const {
   scoreDecreaseThreshold: 42
 });
 
-const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+const { score, bestScore, lastDelta, awardScore, resetScore, setBestScore } = useGameScoring(MODULE_ID, {
   fastThresholdMs: 360,
   slowThresholdMs: 950
 });
@@ -192,6 +178,9 @@ const isFullscreen = ref(false);
 const combo = ref(0);
 const comboMultiplier = ref(1);
 const floatingScore = ref(null);
+
+const attemptSaved = ref(false);
+const saveError = ref(null);
 
 function nowMs() {
   return performance.now();
@@ -231,6 +220,20 @@ async function toggleFullscreen() {
     console.error("Fullscreen error:", error);
   }
 }
+async function loadBestScore() {
+  if (!auth.currentUser) {
+    setBestScore(0);
+    return;
+  }
+
+  try {
+    const stat = await getUserGameStat(auth.currentUser.uid, GAME_KEY);
+    setBestScore(stat?.bestScore ?? 0);
+  } catch (error) {
+    console.error("Failed to load best score:", error);
+    setBestScore(0);
+  }
+}
 
 function handleFullscreenChange() {
   isFullscreen.value = Boolean(document.fullscreenElement);
@@ -250,6 +253,8 @@ function reset() {
   combo.value = 0;
   comboMultiplier.value = 1;
   floatingScore.value = null;
+  attemptSaved.value = false;
+  saveError.value = null;
 }
 
 function stop() {
@@ -368,6 +373,7 @@ function onKeydown(e) {
 }
 
 onMounted(() => {
+  loadBestScore();
   window.addEventListener("keydown", onKeydown);
   document.addEventListener("fullscreenchange", handleFullscreenChange);
 });
@@ -407,23 +413,43 @@ const summary = computed(() => {
   };
 });
 
-const payload = computed(() =>
-  buildPayload(summary.value, {
-    difficulty: difficulty.value,
-    score: score.value,
-    bestScore: bestScore.value,
-    settings: {
-      totalTrials: totalTrials.value,
-      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
-      isiMs: levelConfig.value.isiMs,
-      noGoProbability: levelConfig.value.noGoProbability,
-      adaptive: true,
-      localScore: true,
-      fullscreen: true,
-      combo: true,
-      scorePopup: true
+watch(
+  () => phase.value,
+  async (newPhase) => {
+    if (newPhase !== "finished") return;
+    if (attemptSaved.value) return;
+    if (!auth.currentUser) return;
+    if (!responses.value.length) return;
+
+    attemptSaved.value = true;
+    saveError.value = null;
+
+    try {
+      const stat = await saveAttempt({
+        uid: auth.currentUser.uid,
+        username: auth.currentUser.displayName || auth.currentUser.email,
+        gameKey: GAME_KEY,
+        score: score.value,
+        accuracy: summary.value.accuracy,
+        durationMs: summary.value.avgRTms ? Math.round(summary.value.avgRTms) : null,
+        difficultyStart: 3,
+        difficultyEnd: difficulty.value,
+        rawPayload: {
+          hits: summary.value.hits,
+          misses: summary.value.misses,
+          falseAlarms: summary.value.falseAlarms,
+          correctInhibitions: summary.value.correctInhibitions,
+          avgRTms: summary.value.avgRTms,
+          payload: payload.value
+        }
+      });
+      setBestScore(stat?.bestScore ?? 0);
+    } catch (error) {
+      console.error("Failed to save Go/No-Go attempt:", error);
+      saveError.value = error;
+      attemptSaved.value = false;
     }
-  })
+  }
 );
 </script>
 
@@ -656,7 +682,7 @@ button:disabled {
   border-radius: 10px;
   overflow: auto;
 }
-/* БАЗА */
+
 .btn {
   padding: 12px 18px;
   border-radius: 14px;
@@ -698,6 +724,7 @@ button:disabled {
   background: linear-gradient(135deg, #64748b, #475569);
   color: white;
 }
+
 .btn-press {
   background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
@@ -737,13 +764,10 @@ button:disabled {
 .game-shell:fullscreen .stimulusBox {
   width: 100%;
   max-width: 900px;
-
   height: 420px;
-
   display: flex;
   align-items: center;
   justify-content: center;
-
   margin: 0 auto;
 }
 
@@ -773,63 +797,6 @@ button:disabled {
   font-size: 15px;
 }
 
-.btn {
-  padding: 12px 18px;
-  border-radius: 14px;
-  border: none;
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-}
-
-.btn:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-}
-
-.btn:active {
-  transform: scale(0.96);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.btn-start {
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  color: white;
-}
-
-.btn-stop {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: white;
-}
-
-.btn-reset {
-  background: linear-gradient(135deg, #64748b, #475569);
-  color: white;
-}
-
-.btn-press {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
-  font-size: 16px;
-  padding: 14px 22px;
-  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.35);
-}
-
-.btn-press:hover {
-  transform: scale(1.05);
-}
-
-.btn-press:active {
-  transform: scale(0.92);
-}
 .module-description {
   margin: 10px 0 14px;
   padding: 12px 14px;

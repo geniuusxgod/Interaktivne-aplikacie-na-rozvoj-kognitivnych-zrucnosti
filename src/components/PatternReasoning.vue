@@ -18,18 +18,6 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <!-- <div class="panel">
-      <div><b>Rule:</b> Choose the missing next symbol in the sequence.</div>
-
-      <template v-if="showDebug">
-        <div><b>Success streak:</b> {{ successStreak }}</div>
-        <div><b>Rule complexity:</b> {{ levelConfig.ruleComplexity }}</div>
-        <div><b>Sequence length:</b> {{ levelConfig.sequenceLength }}</div>
-        <div><b>Options:</b> {{ levelConfig.optionCount }}</div>
-        <div><b>Time limit:</b> {{ levelConfig.timeLimitMs }} ms</div>
-      </template>
-    </div> -->
-
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
         <div class="game-shell-title-wrap">
@@ -88,7 +76,7 @@
           <div v-else class="placeholder">—</div>
         </div>
 
-        <div class="options" v-if="currentPuzzle">
+        <div v-if="currentPuzzle" class="options">
           <button
             v-for="option in currentPuzzle.options"
             :key="option.id"
@@ -124,24 +112,22 @@
         <li>Final score: {{ score }}</li>
         <li>Best score: {{ bestScore }}</li>
       </ul>
-
-      <details>
-        <summary>Payload</summary>
-        <pre class="pre">{{ payload }}</pre>
-      </details>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
+import { auth } from "../firebase";
+import { getUserGameStat, saveAttempt } from "../services/gameResultsService";
 
 const MODULE_ID = "logic_pattern_reasoning";
 const CATEGORY = "logicke_myslenie";
+const GAME_KEY = "patternreasoning";
 
 const {
   phase,
@@ -151,8 +137,7 @@ const {
   stopSession,
   resetSession,
   nextTrial,
-  addResponse,
-  buildPayload
+  addResponse
 } = useGameSession(MODULE_ID, CATEGORY);
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
@@ -160,10 +145,8 @@ const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 const {
   difficulty,
   difficultyLabel,
-  successStreak,
   resetDifficulty,
-  updateDifficulty,
-  showDebug
+  updateDifficulty
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
@@ -178,7 +161,7 @@ const {
   scoreDecreaseThreshold: 42
 });
 
-const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+const { score, bestScore, lastDelta, awardScore, resetScore, setBestScore } = useGameScoring(MODULE_ID, {
   fastThresholdMs: 1200,
   slowThresholdMs: 6000
 });
@@ -217,12 +200,11 @@ const floatingScore = ref(null);
 const gameShellRef = ref(null);
 const isFullscreen = ref(false);
 
+const attemptSaved = ref(false);
+const saveError = ref(null);
+
 function nowMs() {
   return performance.now();
-}
-
-function randomItem(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function shuffle(array) {
@@ -311,6 +293,20 @@ async function toggleFullscreen() {
     await document.exitFullscreen();
   }
 }
+async function loadBestScore() {
+  if (!auth.currentUser) {
+    setBestScore(0);
+    return;
+  }
+
+  try {
+    const stat = await getUserGameStat(auth.currentUser.uid, GAME_KEY);
+    setBestScore(stat?.bestScore ?? 0);
+  } catch (error) {
+    console.error("Failed to load best score:", error);
+    setBestScore(0);
+  }
+}
 
 function handleFullscreenChange() {
   isFullscreen.value = Boolean(document.fullscreenElement);
@@ -329,6 +325,8 @@ function reset() {
 
   combo.value = 0;
   floatingScore.value = null;
+  attemptSaved.value = false;
+  saveError.value = null;
 }
 
 function stop() {
@@ -439,6 +437,7 @@ function submitAnswer(answerValue) {
 }
 
 onMounted(() => {
+  loadBestScore();
   document.addEventListener("fullscreenchange", handleFullscreenChange);
 });
 
@@ -465,24 +464,42 @@ const summary = computed(() => {
   };
 });
 
-const payload = computed(() =>
-  buildPayload(summary.value, {
-    difficulty: difficulty.value,
-    score: score.value,
-    bestScore: bestScore.value,
-    settings: {
-      totalRounds: totalRounds.value,
-      ruleComplexity: levelConfig.value.ruleComplexity,
-      sequenceLength: levelConfig.value.sequenceLength,
-      optionCount: levelConfig.value.optionCount,
-      timeLimitMs: levelConfig.value.timeLimitMs,
-      adaptive: true,
-      localScore: true,
-      fullscreen: true,
-      combo: true,
-      scorePopup: true
+watch(
+  () => phase.value,
+  async (newPhase) => {
+    if (newPhase !== "finished") return;
+    if (attemptSaved.value) return;
+    if (!auth.currentUser) return;
+    if (!responses.value.length) return;
+
+    attemptSaved.value = true;
+    saveError.value = null;
+
+    try {
+      const stat = await saveAttempt({
+        uid: auth.currentUser.uid,
+        username: auth.currentUser.displayName || auth.currentUser.email,
+        gameKey: GAME_KEY,
+        score: score.value,
+        accuracy: summary.value.accuracy,
+        durationMs: summary.value.avgRTms ? Math.round(summary.value.avgRTms) : null,
+        difficultyStart: 2,
+        difficultyEnd: difficulty.value,
+        rawPayload: {
+          correct: summary.value.correct,
+          incorrect: summary.value.incorrect,
+          timeouts: summary.value.timeouts,
+          avgRTms: summary.value.avgRTms,
+          payload: payload.value
+        }
+      });
+      setBestScore(stat?.bestScore ?? 0);
+    } catch (error) {
+      console.error("Failed to save Pattern Reasoning attempt:", error);
+      saveError.value = error;
+      attemptSaved.value = false;
     }
-  })
+  }
 );
 </script>
 
@@ -500,14 +517,6 @@ const payload = computed(() =>
   gap: 14px;
   flex-wrap: wrap;
   margin-bottom: 10px;
-}
-
-.panel {
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: white;
 }
 
 .game-shell {
@@ -716,11 +725,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.hint {
-  color: #555;
-  margin-bottom: 12px;
-}
-
 .hint-centered {
   text-align: center;
   color: rgba(255, 255, 255, 0.75);
@@ -840,6 +844,7 @@ button:disabled {
 .game-shell:fullscreen .combo-badge {
   font-size: 15px;
 }
+
 .module-description {
   margin: 10px 0 14px;
   padding: 12px 14px;

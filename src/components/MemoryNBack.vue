@@ -1,23 +1,17 @@
 <template>
   <div class="module">
-    <h2>Memory N-Back</h2>
+    <h2>N-Back</h2>
     <p class="module-description">
       <b>Rule: </b>V tejto úlohe sa postupne zobrazujú symboly a tvojou úlohou je označiť zhodu vtedy, keď sa aktuálny symbol zhoduje so symbolom, ktorý sa zobrazil o <b>{{ selectedN }}</b> kroky späť. Používateľ musí priebežne sledovať celú sériu podnetov, porovnávať ich s predchádzajúcimi a reagovať iba v správnom okamihu.
     </p>
 
     <div class="topbar">
-      <div><b>Kategória:</b> Pamäť</div>
-      <div><b>Status:</b> {{ phase }}</div>
-      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>N:</b> {{ selectedN }}</div>
-      <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
-      <div><b>Block:</b> {{ currentBlockIndex }} / {{ totalBlocks }}</div>
+      <div><b>Round:</b> {{ trialIndex }} / {{ totalTrials }}</div>
     </div>
 
     <div class="scorebar">
       <div><b>Score:</b> {{ score }}</div>
       <div><b>Best score:</b> {{ bestScore }}</div>
-      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
     <div class="game-shell" ref="gameShellRef">
@@ -93,16 +87,6 @@
           <button class="btn btn-match" :disabled="phase !== 'running'" @click="registerResponse">Match</button>
           <button class="btn btn-reset" :disabled="phase !== 'finished'" @click="reset">Reset</button>
         </div>
-
-        <div v-if="showDebug" class="debug debug-dark">
-          <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-          <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
-          <div><b>N:</b> {{ selectedN }}</div>
-        </div>
-
-        <div class="hint hint-centered">
-          Difficulty changes speed only. N is selected manually.
-        </div>
       </div>
     </div>
 
@@ -152,10 +136,8 @@ const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
 const {
   difficulty,
-  difficultyLabel,
   resetDifficulty,
   updateDifficulty,
-  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
@@ -536,8 +518,7 @@ watch(
           falseAlarms: summary.value.falseAlarms,
           correctRejections: summary.value.correctRejections,
           targetRate: summary.value.targetRate,
-          avgRTms: summary.value.avgRTms,
-          payload: payload.value
+          avgRTms: summary.value.avgRTms
         }
       });
       setBestScore(stat?.bestScore ?? 0);
@@ -756,26 +737,6 @@ button:disabled,
 select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.debug {
-  margin-top: 12px;
-  padding: 12px;
-  border-radius: 12px;
-  display: grid;
-  gap: 6px;
-}
-
-.debug-dark {
-  border: 1px dashed rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.hint-centered {
-  text-align: center;
-  color: rgba(255, 255, 255, 0.75);
-  margin-top: 8px;
 }
 
 .results {

@@ -6,16 +6,12 @@
     </p>
 
     <div class="topbar">
-      <div><b>Kategória:</b> Vnímanie</div>
-      <div><b>Status:</b> {{ phase }}</div>
-      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
-      <div><b>Trial:</b> {{ trialIndex }} / {{ totalTrials }}</div>
+      <div><b>Round:</b> {{ trialIndex }} / {{ totalTrials }}</div>
     </div>
 
     <div class="scorebar">
       <div><b>Score:</b> {{ score }}</div>
       <div><b>Best score:</b> {{ bestScore }}</div>
-      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
     <div class="game-shell" ref="gameShellRef">
@@ -82,10 +78,6 @@
           <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
           <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
           <button class="btn btn-reset" :disabled="phase !== 'finished'" @click="reset">Reset</button>
-        </div>
-
-        <div class="hint hint-centered">
-          Click the highlighted cell as fast as possible.
         </div>
       </div>
     </div>
@@ -388,8 +380,7 @@ watch(
         rawPayload: {
           hits: summary.value.hits,
           misses: summary.value.misses,
-          avgRTms: summary.value.avgRTms,
-          payload: payload.value
+          avgRTms: summary.value.avgRTms
         }
       });
       setBestScore(stat?.bestScore ?? 0);
@@ -584,10 +575,7 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.hint-centered {
-  text-align: center;
-  color: rgba(255, 255, 255, 0.75);
-}
+
 
 .results {
   margin-top: 18px;

@@ -6,16 +6,12 @@
     </p>
 
     <div class="topbar">
-      <div><b>Kategória:</b> Pamäť</div>
-      <div><b>Mode:</b> {{ modeLabel }}</div>
-      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
     </div>
 
     <div class="scorebar">
       <div><b>Score:</b> {{ score }}</div>
-      <div><b>Best score:</b> {{ bestScore }}</div>
-      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
+      <div><b>Best score:</b> {{ bestScore }}</div> 
     </div>
 
     <div class="game-shell" ref="gameShellRef">
@@ -116,17 +112,6 @@
             Reset
           </button>
         </div>
-
-        <div v-if="showDebug" class="debug debug-dark">
-          <div><b>Span length:</b> {{ levelConfig.spanLength }}</div>
-          <div><b>Digit duration:</b> {{ levelConfig.digitDurationMs }} ms</div>
-          <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
-          <div><b>Mode:</b> {{ modeLabel }}</div>
-        </div>
-
-        <div class="hint hint-centered">
-          Higher difficulty increases span length and speeds up digit presentation.
-        </div>
       </div>
     </div>
 
@@ -173,10 +158,8 @@ const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 
 const {
   difficulty,
-  difficultyLabel,
   resetDifficulty,
   updateDifficulty,
-  showDebug
 } = useAdaptiveDifficulty({
   minDifficulty: 1,
   maxDifficulty: 10,
@@ -494,8 +477,7 @@ watch(
           maxSpanReached: summary.value.maxSpanReached,
           correctRounds: summary.value.correctRounds,
           totalRounds: summary.value.totalRounds,
-          avgAnswerTimeMs: summary.value.avgAnswerTimeMs,
-          payload: payload.value
+          avgAnswerTimeMs: summary.value.avgAnswerTimeMs
         }
       });
       setBestScore(stat?.bestScore ?? 0);
@@ -742,10 +724,6 @@ input:disabled {
   cursor: not-allowed;
 }
 
-.hint-centered {
-  text-align: center;
-  color: rgba(255, 255, 255, 0.75);
-}
 
 .results {
   margin-top: 18px;

@@ -1,13 +1,13 @@
 <template>
   <div class="auth-card">
     <div v-if="loading" class="auth-loading">
-      Проверка пользователя...
+      Verifying the user...
     </div>
 
     <template v-else>
       <div v-if="user" class="auth-user">
         <div class="auth-user-info">
-          <div class="auth-label">Пользователь</div>
+          <div class="auth-label">User</div>
           <div class="auth-name">
             {{ user.displayName || user.email }}
           </div>
@@ -15,7 +15,7 @@
         </div>
 
         <button class="auth-logout" @click="handleLogout" :disabled="pending">
-          {{ pending ? "Выход..." : "Выйти" }}
+          {{ pending ? "Logging out..." : "Logout" }}
         </button>
       </div>
 
@@ -26,14 +26,14 @@
             @click="setMode('login')"
             type="button"
           >
-            Вход
+            Login
           </button>
           <button
             :class="['auth-tab', { active: mode === 'register' }]"
             @click="setMode('register')"
             type="button"
           >
-            Регистрация
+            Registration
           </button>
         </div>
 
@@ -42,7 +42,7 @@
             v-if="mode === 'register'"
             v-model.trim="username"
             type="text"
-            placeholder="Имя пользователя"
+            placeholder="Username"
           />
 
           <input
@@ -54,7 +54,7 @@
           <input
             v-model="password"
             type="password"
-            placeholder="Пароль"
+            placeholder="Password"
           />
 
           <p v-if="errorMessage" class="auth-error">
@@ -62,7 +62,7 @@
           </p>
 
           <button class="auth-submit" type="submit" :disabled="pending">
-            {{ pending ? "Подождите..." : mode === 'login' ? "Войти" : "Зарегистрироваться" }}
+            {{ pending ? "Waiting..." : mode === 'login' ? "Login" : "Registration" }}
           </button>
         </form>
       </div>
@@ -78,6 +78,7 @@ import {
   registerUser,
   subscribeToAuth,
 } from "../services/authService";
+import { map } from "firebase/firestore/pipelines";
 
 const mode = ref("login");
 const user = ref(null);
@@ -111,38 +112,38 @@ function mapFirebaseError(error) {
   const code = error?.code || "";
 
   if (code.includes("auth/email-already-in-use")) {
-    return "Этот email уже используется.";
+    return "This email is already in use.";
   }
 
   if (code.includes("auth/invalid-email")) {
-    return "Неверный формат email.";
+    return "Invalid email format.";
   }
 
   if (code.includes("auth/user-not-found") || code.includes("auth/wrong-password") || code.includes("auth/invalid-credential")) {
-    return "Неверный email или пароль.";
+    return "Invalid email or password.";
   }
 
   if (code.includes("auth/weak-password")) {
-    return "Пароль слишком слабый. Используй минимум 6 символов.";
+    return "Password is too weak. Use at least 6 characters.";
   }
 
   if (code.includes("auth/missing-password")) {
-    return "Введите пароль.";
+    return "Please enter a password.";
   }
 
-  return "Произошла ошибка. Проверь данные и попробуй снова.";
+  return "An error occurred. Please check your details and try again.";
 }
 
 async function handleSubmit() {
   errorMessage.value = "";
 
   if (!email.value || !password.value) {
-    errorMessage.value = "Введите email и пароль.";
+    errorMessage.value = "Please enter email and password.";
     return;
   }
 
   if (mode.value === "register" && !username.value) {
-    errorMessage.value = "Введите имя пользователя.";
+    errorMessage.value = "Please enter a username.";
     return;
   }
 
@@ -160,7 +161,7 @@ async function handleSubmit() {
     password.value = "";
   } catch (error) {
   console.error("FIREBASE ERROR:", error)
-  errorMessage.value = `${error.code || "unknown"}: ${error.message || "No message"}`
+  errorMessage.value = mapFirebaseError(error);
 
   } finally {
     pending.value = false;
@@ -183,8 +184,9 @@ async function handleLogout() {
 
 <style scoped>
 .auth-card {
-  margin-bottom: 18px;
-  padding: 16px;
+  max-width: 760px;
+  margin: 0 auto 18px;
+  padding: 20px;
   border: 1px solid #dbe2ea;
   border-radius: 16px;
   background: #f8fafc;
@@ -192,6 +194,7 @@ async function handleLogout() {
 
 .auth-loading {
   color: #475569;
+  text-align: center;
 }
 
 .auth-user {
@@ -228,6 +231,7 @@ async function handleLogout() {
 
 .auth-tabs {
   display: flex;
+  justify-content: center;
   gap: 8px;
   margin-bottom: 14px;
 }
@@ -247,12 +251,16 @@ async function handleLogout() {
 }
 
 .auth-form {
+  max-width: 560px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
 .auth-form input {
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #cbd5e1;
@@ -268,11 +276,12 @@ async function handleLogout() {
   margin: 0;
   color: #b91c1c;
   font-size: 14px;
+  text-align: center;
 }
 
 .auth-submit,
 .auth-logout {
-  align-self: flex-start;
+  align-self: center;
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid #cbd5e1;

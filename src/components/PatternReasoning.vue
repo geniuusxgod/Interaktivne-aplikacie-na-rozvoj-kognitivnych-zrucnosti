@@ -6,16 +6,12 @@
     </p>
 
     <div class="topbar">
-      <div><b>Kategória:</b> Logické myslenie</div>
-      <div><b>Status:</b> {{ phase }}</div>
-      <div><b>Obtiažnosť:</b> {{ difficultyLabel }}</div>
       <div><b>Round:</b> {{ trialIndex }} / {{ totalRounds }}</div>
     </div>
 
     <div class="scorebar">
       <div><b>Score:</b> {{ score }}</div>
       <div><b>Best score:</b> {{ bestScore }}</div>
-      <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
     <div class="game-shell" ref="gameShellRef">
@@ -92,10 +88,6 @@
           <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
           <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
           <button class="btn btn-reset" :disabled="phase !== 'finished'" @click="reset">Reset</button>
-        </div>
-
-        <div class="hint hint-centered">
-          Difficulty rises by increasing pattern complexity, distractors, and time pressure.
         </div>
       </div>
     </div>
@@ -489,8 +481,7 @@ watch(
           correct: summary.value.correct,
           incorrect: summary.value.incorrect,
           timeouts: summary.value.timeouts,
-          avgRTms: summary.value.avgRTms,
-          payload: payload.value
+          avgRTms: summary.value.avgRTms
         }
       });
       setBestScore(stat?.bestScore ?? 0);
@@ -723,11 +714,6 @@ watch(
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.hint-centered {
-  text-align: center;
-  color: rgba(255, 255, 255, 0.75);
 }
 
 .results {

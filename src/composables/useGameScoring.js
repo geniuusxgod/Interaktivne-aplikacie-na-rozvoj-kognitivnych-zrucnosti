@@ -4,31 +4,9 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function safeStorageGet(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return fallback;
-    const parsed = JSON.parse(raw);
-    return parsed ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function safeStorageSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore storage failures
-  }
-}
-
 export function useGameScoring(moduleId, options = {}) {
-  const bestScoreKey = `best_score:${moduleId}`;
-  const lastScoreKey = `last_score:${moduleId}`;
-
   const score = ref(0);
-  const bestScore = ref(safeStorageGet(bestScoreKey, 0));
+  const bestScore = ref(0);
   const lastDelta = ref(0);
 
   const fastThresholdMs = options.fastThresholdMs ?? 600;
@@ -70,20 +48,16 @@ export function useGameScoring(moduleId, options = {}) {
     const delta = computeDelta(input);
     score.value = Math.max(0, score.value + delta);
     lastDelta.value = delta;
-
-    if (score.value > bestScore.value) {
-      bestScore.value = score.value;
-      safeStorageSet(bestScoreKey, bestScore.value);
-    }
-
-    safeStorageSet(lastScoreKey, score.value);
     return delta;
+  }
+
+  function setBestScore(value) {
+    bestScore.value = Number(value) || 0;
   }
 
   function resetScore() {
     score.value = 0;
     lastDelta.value = 0;
-    safeStorageSet(lastScoreKey, 0);
   }
 
   return {
@@ -91,6 +65,7 @@ export function useGameScoring(moduleId, options = {}) {
     bestScore,
     lastDelta,
     awardScore,
-    resetScore
+    resetScore,
+    setBestScore,
   };
 }

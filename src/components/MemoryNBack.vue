@@ -20,16 +20,6 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <!-- <div class="panel">
-      <div><b>Rule:</b> Press <b>Space</b> or click <b>Match</b> when the current stimulus matches the one {{ selectedN }} step(s) back.</div>
-
-      <template v-if="showDebug">
-        <div><b>Success streak:</b> {{ successStreak }}</div>
-        <div><b>Stimulus duration:</b> {{ levelConfig.stimulusDurationMs }} ms</div>
-        <div><b>ISI:</b> {{ levelConfig.isiMs }} ms</div>
-      </template>
-    </div> -->
-
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
         <div class="game-shell-title-wrap">
@@ -130,24 +120,22 @@
         <li>Final score: {{ score }}</li>
         <li>Best score: {{ bestScore }}</li>
       </ul>
-
-      <details>
-        <summary>Payload</summary>
-        <pre class="pre">{{ payload }}</pre>
-      </details>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
+import { auth } from "../firebase";
+import { getUserGameStat, saveAttempt } from "../services/gameResultsService";
 
 const MODULE_ID = "memory_nback";
 const CATEGORY = "pamat";
+const GAME_KEY = "nback";
 
 const {
   phase,
@@ -157,8 +145,7 @@ const {
   stopSession,
   resetSession,
   nextTrial,
-  addResponse,
-  buildPayload
+  addResponse
 } = useGameSession(MODULE_ID, CATEGORY);
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
@@ -166,7 +153,6 @@ const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 const {
   difficulty,
   difficultyLabel,
-  successStreak,
   resetDifficulty,
   updateDifficulty,
   showDebug
@@ -184,7 +170,7 @@ const {
   scoreDecreaseThreshold: 42
 });
 
-const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+const { score, bestScore, lastDelta, awardScore, resetScore, setBestScore } = useGameScoring(MODULE_ID, {
   fastThresholdMs: 420,
   slowThresholdMs: 1300
 });
@@ -231,6 +217,9 @@ const floatingScore = ref(null);
 
 const gameShellRef = ref(null);
 const isFullscreen = ref(false);
+
+const attemptSaved = ref(false);
+const saveError = ref(null);
 
 function nowMs() {
   return performance.now();
@@ -283,6 +272,29 @@ async function toggleFullscreen() {
     await document.exitFullscreen();
   }
 }
+async function loadBestScore() {
+  if (!auth.currentUser) {
+    setBestScore(0);
+    return;
+  }
+
+  try {
+    const stat = await getUserGameStat(
+      auth.currentUser.uid,
+      GAME_KEY,
+      `${selectedN.value}back`
+    );
+    setBestScore(stat?.bestScore ?? 0);
+  } catch (error) {
+    console.error("Failed to load N-Back best score:", error);
+    setBestScore(0);
+  }
+}
+watch(selectedN, () => {
+  if (phase.value === "idle" || phase.value === "finished") {
+    loadBestScore();
+  }
+});
 
 function handleFullscreenChange() {
   isFullscreen.value = Boolean(document.fullscreenElement);
@@ -303,6 +315,8 @@ function reset() {
 
   combo.value = 0;
   floatingScore.value = null;
+  attemptSaved.value = false;
+  saveError.value = null;
 }
 
 function stop() {
@@ -493,24 +507,46 @@ const summary = computed(() => {
   };
 });
 
-const payload = computed(() =>
-  buildPayload(summary.value, {
-    difficulty: difficulty.value,
-    score: score.value,
-    bestScore: bestScore.value,
-    settings: {
-      totalTrials: totalTrials.value,
-      blockSize: blockSize.value,
-      n: selectedN.value,
-      stimulusDurationMs: levelConfig.value.stimulusDurationMs,
-      isiMs: levelConfig.value.isiMs,
-      adaptive: true,
-      localScore: true,
-      fullscreen: true,
-      combo: true,
-      scorePopup: true
+watch(
+  () => phase.value,
+  async (newPhase) => {
+    if (newPhase !== "finished") return;
+    if (attemptSaved.value) return;
+    if (!auth.currentUser) return;
+    if (!responses.value.length) return;
+
+    attemptSaved.value = true;
+    saveError.value = null;
+
+    try {
+      const stat = await saveAttempt({
+        uid: auth.currentUser.uid,
+        username: auth.currentUser.displayName || auth.currentUser.email,
+        gameKey: GAME_KEY,
+        modeKey: `${selectedN.value}back`,
+        score: score.value,
+        accuracy: summary.value.accuracy,
+        durationMs: summary.value.avgRTms ? Math.round(summary.value.avgRTms) : null,
+        difficultyStart: 3,
+        difficultyEnd: difficulty.value,
+        rawPayload: {
+          n: selectedN.value,
+          hits: summary.value.hits,
+          misses: summary.value.misses,
+          falseAlarms: summary.value.falseAlarms,
+          correctRejections: summary.value.correctRejections,
+          targetRate: summary.value.targetRate,
+          avgRTms: summary.value.avgRTms,
+          payload: payload.value
+        }
+      });
+      setBestScore(stat?.bestScore ?? 0);
+    } catch (error) {
+      console.error("Failed to save N-Back attempt:", error);
+      saveError.value = error;
+      attemptSaved.value = false;
     }
-  })
+  }
 );
 </script>
 
@@ -528,14 +564,6 @@ const payload = computed(() =>
   gap: 14px;
   flex-wrap: wrap;
   margin-bottom: 10px;
-}
-
-.panel {
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  padding: 12px;
-  margin: 12px 0;
-  background: white;
 }
 
 .game-shell {
@@ -707,13 +735,10 @@ const payload = computed(() =>
   letter-spacing: 2px;
 }
 
-.subhint {
-  margin-top: 6px;
-}
-
 .subhint-dark {
   color: rgba(255, 255, 255, 0.68);
   text-align: center;
+  margin-top: 6px;
 }
 
 .controls {
@@ -747,14 +772,10 @@ select:disabled {
   color: rgba(255, 255, 255, 0.78);
 }
 
-.hint {
-  margin-top: 8px;
-  opacity: 0.8;
-}
-
 .hint-centered {
   text-align: center;
   color: rgba(255, 255, 255, 0.75);
+  margin-top: 8px;
 }
 
 .results {
@@ -867,6 +888,7 @@ select:disabled {
 .game-shell:fullscreen .stimulus {
   font-size: 96px;
 }
+
 .module-description {
   margin: 10px 0 14px;
   padding: 12px 14px;

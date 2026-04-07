@@ -18,17 +18,6 @@
       <div><b>Last delta:</b> {{ lastDelta >= 0 ? `+${lastDelta}` : lastDelta }}</div>
     </div>
 
-    <!-- <div class="panel">
-      <div><b>Rule:</b> Memorize the digits and repeat them in the selected mode.</div>
-
-      <template v-if="showDebug">
-        <div><b>Span length:</b> {{ levelConfig.spanLength }}</div>
-        <div><b>Digit duration:</b> {{ levelConfig.digitDurationMs }} ms</div>
-        <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
-        <div><b>Success streak:</b> {{ successStreak }}</div>
-      </template>
-    </div> -->
-
     <div class="game-shell" ref="gameShellRef">
       <div class="game-shell-header">
         <div class="game-shell-title-wrap">
@@ -102,7 +91,7 @@
           </div>
         </div>
 
-        <div class="answer" v-if="phase === 'answering'">
+        <div v-if="phase === 'answering'" class="answer">
           <div class="answerRow">
             <input
               v-model="answer"
@@ -128,6 +117,13 @@
           </button>
         </div>
 
+        <div v-if="showDebug" class="debug debug-dark">
+          <div><b>Span length:</b> {{ levelConfig.spanLength }}</div>
+          <div><b>Digit duration:</b> {{ levelConfig.digitDurationMs }} ms</div>
+          <div><b>Gap:</b> {{ levelConfig.gapMs }} ms</div>
+          <div><b>Mode:</b> {{ modeLabel }}</div>
+        </div>
+
         <div class="hint hint-centered">
           Higher difficulty increases span length and speeds up digit presentation.
         </div>
@@ -145,24 +141,22 @@
         <li>Final score: {{ score }}</li>
         <li>Best score: {{ bestScore }}</li>
       </ul>
-
-      <details>
-        <summary>Payload</summary>
-        <pre class="pre">{{ payload }}</pre>
-      </details>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { useGameSession } from "../composables/useGameSession";
 import { useTimeout } from "../composables/useTimeout";
 import { useAdaptiveDifficulty } from "../composables/useAdaptiveDifficulty";
 import { useGameScoring } from "../composables/useGameScoring";
+import { auth } from "../firebase";
+import { getUserGameStat, saveAttempt } from "../services/gameResultsService";
 
 const MODULE_ID = "memory_digit_span";
 const CATEGORY = "pamat";
+const GAME_KEY = "digitspan";
 
 const {
   phase,
@@ -172,8 +166,7 @@ const {
   stopSession,
   resetSession,
   nextTrial,
-  addResponse,
-  buildPayload
+  addResponse
 } = useGameSession(MODULE_ID, CATEGORY);
 
 const { setManagedTimeout, clearAllTimeouts } = useTimeout();
@@ -181,7 +174,6 @@ const { setManagedTimeout, clearAllTimeouts } = useTimeout();
 const {
   difficulty,
   difficultyLabel,
-  successStreak,
   resetDifficulty,
   updateDifficulty,
   showDebug
@@ -199,7 +191,7 @@ const {
   scoreDecreaseThreshold: 42
 });
 
-const { score, bestScore, lastDelta, awardScore, resetScore } = useGameScoring(MODULE_ID, {
+const { score, bestScore, lastDelta, awardScore, resetScore, setBestScore } = useGameScoring(MODULE_ID, {
   fastThresholdMs: 1800,
   slowThresholdMs: 8000
 });
@@ -239,6 +231,9 @@ const floatingScore = ref(null);
 const gameShellRef = ref(null);
 const isFullscreen = ref(false);
 
+const attemptSaved = ref(false);
+const saveError = ref(null);
+
 function nowMs() {
   return performance.now();
 }
@@ -261,6 +256,29 @@ async function toggleFullscreen() {
     await document.exitFullscreen();
   }
 }
+async function loadBestScore() {
+  if (!auth.currentUser) {
+    setBestScore(0);
+    return;
+  }
+
+  try {
+    const stat = await getUserGameStat(
+      auth.currentUser.uid,
+      GAME_KEY,
+      mode.value
+    );
+    setBestScore(stat?.bestScore ?? 0);
+  } catch (error) {
+    console.error("Failed to load Digit Span best score:", error);
+    setBestScore(0);
+  }
+}
+watch(mode, () => {
+  if (phase.value === "idle" || phase.value === "finished") {
+    loadBestScore();
+  }
+});
 
 function handleFullscreenChange() {
   isFullscreen.value = Boolean(document.fullscreenElement);
@@ -280,6 +298,8 @@ function reset() {
 
   combo.value = 0;
   floatingScore.value = null;
+  attemptSaved.value = false;
+  saveError.value = null;
 }
 
 function stop() {
@@ -446,24 +466,45 @@ const summary = computed(() => {
   };
 });
 
-const payload = computed(() =>
-  buildPayload(summary.value, {
-    difficulty: difficulty.value,
-    score: score.value,
-    bestScore: bestScore.value,
-    settings: {
-      totalRounds: totalRounds.value,
-      mode: mode.value,
-      spanLength: levelConfig.value.spanLength,
-      digitDurationMs: levelConfig.value.digitDurationMs,
-      gapMs: levelConfig.value.gapMs,
-      adaptive: true,
-      localScore: true,
-      fullscreen: true,
-      combo: true,
-      scorePopup: true
+
+watch(
+  () => phase.value,
+  async (newPhase) => {
+    if (newPhase !== "finished") return;
+    if (attemptSaved.value) return;
+    if (!auth.currentUser) return;
+    if (!responses.value.length) return;
+
+    attemptSaved.value = true;
+    saveError.value = null;
+
+    try {
+      const stat = await saveAttempt({
+        uid: auth.currentUser.uid,
+        username: auth.currentUser.displayName || auth.currentUser.email,
+        gameKey: GAME_KEY,
+        modeKey: mode.value,
+        score: score.value,
+        accuracy: summary.value.accuracy,
+        durationMs: summary.value.avgAnswerTimeMs ? Math.round(summary.value.avgAnswerTimeMs) : null,
+        difficultyStart: 3,
+        difficultyEnd: difficulty.value,
+        rawPayload: {
+          mode: mode.value,
+          maxSpanReached: summary.value.maxSpanReached,
+          correctRounds: summary.value.correctRounds,
+          totalRounds: summary.value.totalRounds,
+          avgAnswerTimeMs: summary.value.avgAnswerTimeMs,
+          payload: payload.value
+        }
+      });
+      setBestScore(stat?.bestScore ?? 0);
+    } catch (error) {
+      console.error("Failed to save Digit Span attempt:", error);
+      saveError.value = error;
+      attemptSaved.value = false;
     }
-  })
+  }
 );
 </script>
 
@@ -481,14 +522,6 @@ const payload = computed(() =>
   gap: 14px;
   flex-wrap: wrap;
   margin-bottom: 10px;
-}
-
-.panel {
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: white;
 }
 
 .game-shell {
@@ -658,12 +691,9 @@ const payload = computed(() =>
   letter-spacing: 2px;
 }
 
-.subhint {
-  margin-top: 6px;
-}
-
 .subhint-dark {
   color: rgba(255, 255, 255, 0.68);
+  margin-top: 6px;
 }
 
 .answer {
@@ -710,11 +740,6 @@ select:disabled,
 input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.hint {
-  color: #555;
-  margin-bottom: 12px;
 }
 
 .hint-centered {
@@ -833,6 +858,7 @@ input:disabled {
 .game-shell:fullscreen .stimulus {
   font-size: 72px;
 }
+
 .module-description {
   margin: 10px 0 14px;
   padding: 12px 14px;

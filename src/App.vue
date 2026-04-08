@@ -122,26 +122,7 @@
             <p>Prehľad používateľa a história pokusov.</p>
           </div>
         </div>
-
-        <div class="profile-card">
-          <div class="profile-item">
-            <span class="profile-label">Používateľ</span>
-            <span class="profile-value">
-              {{ currentUser.displayName || 'Bez mena' }}
-            </span>
-          </div>
-
-          <div class="profile-item">
-            <span class="profile-label">Email</span>
-            <span class="profile-value">{{ currentUser.email }}</span>
-          </div>
-
-          <div class="profile-item">
-            <span class="profile-label">UID</span>
-            <span class="profile-value uid">{{ currentUser.uid }}</span>
-          </div>
-        </div>
-
+        <GameStatsOverview />
         <UserHistory />
       </section>
 
@@ -164,6 +145,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import AuthPanel from "./components/AuthPanel.vue";
 import UserHistory from "./components/UserHistory.vue";
 import Leaderboard from "./components/Leaderboard.vue";
+import GameStatsOverview from "./components/GameStatsOverview.vue";
 
 import MemoryNBack from "./components/MemoryNBack.vue";
 import DigitSpan from "./components/DigitSpan.vue";
@@ -543,40 +525,6 @@ function startGame(categoryKey, gameKey) {
 
 .game-panel {
   margin-top: 4px;
-}
-
-.profile-card {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 18px;
-  padding: 16px;
-  border-radius: 16px;
-  background: white;
-  border: 1px solid #e2e8f0;
-}
-
-.profile-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.profile-label {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #64748b;
-}
-
-.profile-value {
-  font-size: 16px;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.profile-value.uid {
-  font-size: 14px;
-  word-break: break-all;
 }
 
 @media (max-width: 1180px) {

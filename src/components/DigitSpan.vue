@@ -57,50 +57,50 @@
             :style="{ width: `${Math.min(100, (trialIndex / totalRounds) * 100)}%` }"
           ></div>
         </div>
+        <div class="game-main">
+          <div class="mode-row">
+            <label class="select select-dark">
+              Mode:
+              <select v-model="mode" :disabled="phase !== 'idle' && phase !== 'finished'">
+                <option value="forward">Forward</option>
+                <option value="backward">Backward</option>
+              </select>
+            </label>
+          </div>
 
-        <div class="mode-row">
-          <label class="select select-dark">
-            Mode:
-            <select v-model="mode" :disabled="phase !== 'idle' && phase !== 'finished'">
-              <option value="forward">Forward</option>
-              <option value="backward">Backward</option>
-            </select>
-          </label>
+          <div class="stimulusBox">
+            <div class="stimulus" v-if="phase === 'showing'">
+              {{ displayDigit }}
+            </div>
+            <div class="stimulus" v-else>
+              {{ phase === 'idle' ? "—" : "Ready" }}
+            </div>
+
+            <div class="subhint subhint-dark">
+              {{
+                phase === "showing"
+                  ? "Zapamätaj si čísla…"
+                  : phase === "answering"
+                    ? "Napíš sekvenciu a potvrď."
+                    : "Stlač Start."
+              }}
+            </div>
+          </div>
+
+          <div v-if="phase === 'answering'" class="answer">
+            <div class="answerRow">
+              <input
+                v-model="answer"
+                class="input input-dark"
+                placeholder="Enter digits (e.g. 49271)"
+                inputmode="numeric"
+                autocomplete="off"
+                @keydown.enter.prevent="submitAnswer"
+              />
+              <button class="btn btn-submit" @click="submitAnswer">Submit</button>
+            </div>
+          </div>
         </div>
-
-        <div class="stimulusBox">
-          <div class="stimulus" v-if="phase === 'showing'">
-            {{ displayDigit }}
-          </div>
-          <div class="stimulus" v-else>
-            {{ phase === 'idle' ? "—" : "Ready" }}
-          </div>
-
-          <div class="subhint subhint-dark">
-            {{
-              phase === "showing"
-                ? "Zapamätaj si čísla…"
-                : phase === "answering"
-                  ? "Napíš sekvenciu a potvrď."
-                  : "Stlač Start."
-            }}
-          </div>
-        </div>
-
-        <div v-if="phase === 'answering'" class="answer">
-          <div class="answerRow">
-            <input
-              v-model="answer"
-              class="input input-dark"
-              placeholder="Enter digits (e.g. 49271)"
-              inputmode="numeric"
-              autocomplete="off"
-              @keydown.enter.prevent="submitAnswer"
-            />
-            <button class="btn btn-submit" @click="submitAnswer">Submit</button>
-          </div>
-        </div>
-
         <div class="controls controls-centered">
           <button class="btn btn-start" :disabled="phase !== 'idle' && phase !== 'finished'" @click="start">
             Start
@@ -795,31 +795,65 @@ input:disabled {
 
 .game-shell:fullscreen .game-shell-body {
   height: calc(100vh - 73px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: center;
-  overflow-y: auto;
-  padding: 24px 20px 28px;
-  gap: 10px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 20px 24px;
+  overflow: hidden;
+  box-sizing: border-box;
+  align-items: stretch;
 }
 
-.game-shell:fullscreen .stimulusBox {
-  flex: 1;
+.game-shell:fullscreen .shell-top-status {
+  min-height: auto;
+  margin: 0;
+}
+
+.game-shell:fullscreen .progress {
   width: 100%;
-  max-width: 900px;
+  max-width: 1100px;
+  justify-self: center;
+  margin: 0;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.game-shell:fullscreen .game-main {
+  width: 100%;
+  max-width: 1100px;
+  min-height: 0;
+  overflow: auto;
+  justify-self: center;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+
+  padding: 6px 0;
+  box-sizing: border-box;
+}
+
+.game-shell:fullscreen .controls {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding-top: 8px;
+  z-index: 2;
+}
+
+.game-shell:fullscreen .controls button,
+.game-shell:fullscreen .fullscreen-btn {
+  font-size: 16px;
+  padding: 12px 18px;
 }
 
 .game-shell:fullscreen .game-shell-title {
   font-size: 26px;
-}
-
-.game-shell:fullscreen .controls button,
-.game-shell:fullscreen .fullscreen-btn,
-.game-shell:fullscreen .select-dark select,
-.game-shell:fullscreen .input {
-  font-size: 16px;
-  padding: 12px 18px;
 }
 
 .game-shell:fullscreen .floating-score {
@@ -832,9 +866,14 @@ input:disabled {
 .game-shell:fullscreen .combo-badge {
   font-size: 15px;
 }
+.game-shell:fullscreen .mode-row,
+.game-shell:fullscreen .answer {
+  width: 100%;
+  max-width: 900px;
+}
 
 .game-shell:fullscreen .stimulus {
-  font-size: 72px;
+  font-size: clamp(52px, 9vh, 72px);
 }
 
 .module-description {

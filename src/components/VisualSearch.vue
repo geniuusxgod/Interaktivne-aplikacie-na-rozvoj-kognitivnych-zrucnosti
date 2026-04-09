@@ -57,21 +57,22 @@
             :style="{ width: `${Math.min(100, (trialIndex / totalTrials) * 100)}%` }"
           ></div>
         </div>
-
-        <div
-          class="search-area"
-          :style="{ gridTemplateColumns: `repeat(${levelConfig.gridColumns}, 70px)` }"
-        >
-          <button
-            v-for="item in currentItems"
-            :key="item.id"
-            class="search-item"
-            :class="{ targetClicked: clicked && item.id === clickedItemId }"
-            :disabled="phase !== 'running' || currentItems.length === 0 || clicked"
-            @click="handleItemClick(item)"
+        <div class="game-main">
+          <div
+            class="search-area"
+            :style="{ gridTemplateColumns: `repeat(${levelConfig.gridColumns}, 70px)` }"
           >
-            {{ item.symbol }}
-          </button>
+            <button
+              v-for="item in currentItems"
+              :key="item.id"
+              class="search-item"
+              :class="{ targetClicked: clicked && item.id === clickedItemId }"
+              :disabled="phase !== 'running' || currentItems.length === 0 || clicked"
+              @click="handleItemClick(item)"
+            >
+              {{ item.symbol }}
+            </button>
+          </div>
         </div>
 
         <div class="controls controls-centered">
@@ -727,18 +728,52 @@ button:disabled {
 
 .game-shell:fullscreen .game-shell-body {
   height: calc(100vh - 73px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: center;
-  overflow-y: auto;
-  padding: 24px 20px 28px;
-  gap: 10px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 20px 24px;
+  overflow: hidden;
+  box-sizing: border-box;
+  align-items: stretch;
 }
 
-.game-shell:fullscreen .search-area {
-  flex: 1;
-  align-content: center;
+.game-shell:fullscreen .shell-top-status {
+  margin: 0;
+}
+
+.game-shell:fullscreen .progress {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.game-shell:fullscreen .game-main {
+  width: 100%;
+  max-width: 1100px;
+  min-height: 0;
+  overflow: auto;
+  justify-self: center;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+
+  padding: 6px 0;
+  box-sizing: border-box;
+}
+
+.game-shell:fullscreen .controls {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding-top: 8px;
 }
 
 .game-shell:fullscreen .game-shell-title {
@@ -751,22 +786,6 @@ button:disabled {
   padding: 12px 18px;
 }
 
-.game-shell:fullscreen .floating-score {
-  top: 110px;
-  right: 34px;
-  font-size: 20px;
-  padding: 12px 16px;
-}
-
-.game-shell:fullscreen .combo-badge {
-  font-size: 15px;
-}
-
-.game-shell:fullscreen .search-item {
-  width: 76px;
-  height: 76px;
-  font-size: 32px;
-}
 
 .module-description {
   margin: 10px 0 14px;

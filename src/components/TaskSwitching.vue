@@ -59,35 +59,35 @@
             :style="{ width: `${Math.min(100, (trialIndex / totalTrials) * 100)}%` }"
           ></div>
         </div>
+        <div class="game-main">
+          <div
+            class="stimulus-box"
+            :class="currentStimulus ? currentStimulus.rule : ''"
+          >
+            <div v-if="currentStimulus" class="stimulus-content">
+              <div class="stimulus-shape" :class="[currentStimulus.shape, currentStimulus.color]"></div>
 
-        <div
-          class="stimulus-box"
-          :class="currentStimulus ? currentStimulus.rule : ''"
-        >
-          <div v-if="currentStimulus" class="stimulus-content">
-            <div class="stimulus-shape" :class="[currentStimulus.shape, currentStimulus.color]"></div>
-
-            <div class="stimulus-meta">
-              <div><b>Rule:</b> {{ currentStimulus.rule === 'color' ? 'Choose color' : 'Choose shape' }}</div>
-              <div><b>Stimulus:</b> {{ currentStimulus.color }} {{ currentStimulus.shape }}</div>
-              <div><b>Trial type:</b> {{ currentStimulus.isSwitchTrial ? 'Switch' : 'Repeat' }}</div>
+              <div class="stimulus-meta">
+                <div><b>Rule:</b> {{ currentStimulus.rule === 'color' ? 'Choose color' : 'Choose shape' }}</div>
+                <div><b>Stimulus:</b> {{ currentStimulus.color }} {{ currentStimulus.shape }}</div>
+                <div><b>Trial type:</b> {{ currentStimulus.isSwitchTrial ? 'Switch' : 'Repeat' }}</div>
+              </div>
             </div>
+
+            <div v-else class="placeholder">—</div>
           </div>
 
-          <div v-else class="placeholder">—</div>
+          <div class="answers">
+            <button
+              v-for="option in currentOptions"
+              :key="option.key"
+              :disabled="phase !== 'running' || !currentStimulus || answered"
+              @click="submitAnswer(option.key)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
         </div>
-
-        <div class="answers">
-          <button
-            v-for="option in currentOptions"
-            :key="option.key"
-            :disabled="phase !== 'running' || !currentStimulus || answered"
-            @click="submitAnswer(option.key)"
-          >
-            {{ option.label }}
-          </button>
-        </div>
-
         <div class="controls controls-centered">
           <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
           <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
@@ -812,30 +812,65 @@ button:disabled {
 
 .game-shell:fullscreen .game-shell-body {
   height: calc(100vh - 73px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: center;
-  overflow-y: auto;
-  padding: 24px 20px 28px;
-  gap: 10px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 20px 24px;
+  overflow: hidden;
+  box-sizing: border-box;
+  align-items: stretch;
 }
 
-.game-shell:fullscreen .stimulus-box {
-  flex: 1;
+.game-shell:fullscreen .shell-top-status {
+  min-height: auto;
+  margin: 0;
+}
+
+.game-shell:fullscreen .progress {
   width: 100%;
-  max-width: 1000px;
+  max-width: 1100px;
+  justify-self: center;
+  margin: 0;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.game-shell:fullscreen .game-main {
+  width: 100%;
+  max-width: 1100px;
+  min-height: 0;
+  overflow: auto;
+  justify-self: center;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+
+  padding: 6px 0;
+  box-sizing: border-box;
+}
+
+.game-shell:fullscreen .controls {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding-top: 8px;
+  z-index: 2;
+}
+
+.game-shell:fullscreen .controls button,
+.game-shell:fullscreen .fullscreen-btn {
+  font-size: 16px;
+  padding: 12px 18px;
 }
 
 .game-shell:fullscreen .game-shell-title {
   font-size: 26px;
-}
-
-.game-shell:fullscreen .controls button,
-.game-shell:fullscreen .fullscreen-btn,
-.game-shell:fullscreen .answers button {
-  font-size: 16px;
-  padding: 12px 18px;
 }
 
 .game-shell:fullscreen .floating-score {
@@ -848,14 +883,18 @@ button:disabled {
 .game-shell:fullscreen .combo-badge {
   font-size: 15px;
 }
+.game-shell:fullscreen .answers {
+  width: 100%;
+  max-width: 1000px;
+}
 
 .game-shell:fullscreen .stimulus-shape {
-  width: 86px;
-  height: 86px;
+  width: clamp(62px, 10vh, 86px);
+  height: clamp(62px, 10vh, 86px);
 }
 
 .game-shell:fullscreen .stimulus-meta {
-  font-size: 18px;
+  font-size: clamp(15px, 2.2vh, 18px);
 }
 
 .module-description {

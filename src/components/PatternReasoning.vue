@@ -58,30 +58,32 @@
           ></div>
         </div>
 
-        <div class="sequence-box">
-          <div v-if="currentPuzzle" class="sequence">
-            <div
-              v-for="(item, idx) in currentPuzzle.sequence"
-              :key="idx"
-              class="sequence-item"
-            >
-              {{ item }}
+        <div class="game-main">
+          <div class="sequence-box">
+            <div v-if="currentPuzzle" class="sequence">
+              <div
+                v-for="(item, idx) in currentPuzzle.sequence"
+                :key="idx"
+                class="sequence-item"
+              >
+                {{ item }}
+              </div>
+              <div class="sequence-item missing">?</div>
             </div>
-            <div class="sequence-item missing">?</div>
+            <div v-else class="placeholder">—</div>
           </div>
-          <div v-else class="placeholder">—</div>
-        </div>
 
-        <div v-if="currentPuzzle" class="options">
-          <button
-            v-for="option in currentPuzzle.options"
-            :key="option.id"
-            class="option-btn"
-            :disabled="phase !== 'running' || answered"
-            @click="submitAnswer(option.value)"
-          >
-            {{ option.value }}
-          </button>
+          <div v-if="currentPuzzle" class="options">
+            <button
+              v-for="option in currentPuzzle.options"
+              :key="option.id"
+              class="option-btn"
+              :disabled="phase !== 'running' || answered"
+              @click="submitAnswer(option.value)"
+            >
+              {{ option.value }}
+            </button>
+          </div>
         </div>
 
         <div class="controls controls-centered">
@@ -782,42 +784,65 @@ button:disabled {
 
 .game-shell:fullscreen .game-shell-body {
   height: calc(100vh - 73px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: center;
-  overflow-y: auto;
-  padding: 24px 20px 28px;
-  gap: 10px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 20px 24px;
+  overflow: hidden;
+  box-sizing: border-box;
+  align-items: stretch;
 }
 
-.game-shell:fullscreen .sequence-box {
-  flex: 1;
+.game-shell:fullscreen .shell-top-status {
+  min-height: auto;
+  margin: 0;
+}
+
+.game-shell:fullscreen .progress {
   width: 100%;
   max-width: 1100px;
+  justify-self: center;
+  margin: 0;
+  flex-shrink: 0;
+  z-index: 2;
 }
 
-.game-shell:fullscreen .game-shell-title {
-  font-size: 26px;
+.game-shell:fullscreen .game-main {
+  width: 100%;
+  max-width: 1100px;
+  min-height: 0;
+  overflow: auto;
+  justify-self: center;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+
+  padding: 6px 0;
+  box-sizing: border-box;
+}
+
+.game-shell:fullscreen .controls {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding-top: 8px;
+  z-index: 2;
 }
 
 .game-shell:fullscreen .controls button,
-.game-shell:fullscreen .fullscreen-btn,
-.game-shell:fullscreen .option-btn {
+.game-shell:fullscreen .fullscreen-btn {
   font-size: 16px;
   padding: 12px 18px;
 }
 
-.game-shell:fullscreen .option-btn {
-  min-width: 84px;
-  min-height: 84px;
-  font-size: 28px;
-}
-
-.game-shell:fullscreen .sequence-item {
-  width: 84px;
-  height: 84px;
-  font-size: 32px;
+.game-shell:fullscreen .game-shell-title {
+  font-size: 26px;
 }
 
 .game-shell:fullscreen .floating-score {
@@ -829,6 +854,23 @@ button:disabled {
 
 .game-shell:fullscreen .combo-badge {
   font-size: 15px;
+}
+.game-shell:fullscreen .options {
+  width: 100%;
+  max-width: 1100px;
+  flex-shrink: 0;
+}
+
+.game-shell:fullscreen .option-btn {
+  min-width: clamp(64px, 9vh, 84px);
+  min-height: clamp(64px, 9vh, 84px);
+  font-size: clamp(22px, 3.2vh, 28px);
+}
+
+.game-shell:fullscreen .sequence-item {
+  width: clamp(64px, 9vh, 84px);
+  height: clamp(64px, 9vh, 84px);
+  font-size: clamp(24px, 3.8vh, 32px);
 }
 
 .module-description {

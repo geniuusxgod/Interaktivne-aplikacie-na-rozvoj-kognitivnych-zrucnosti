@@ -58,22 +58,23 @@
           ></div>
         </div>
 
-        <div
-          class="grid"
-          :style="{ gridTemplateColumns: `repeat(${gridSize}, minmax(56px, 70px))` }"
-        >
-          <button
-            v-for="cell in cells"
-            :key="cell"
-            class="cell"
-            :class="{ active: activeCell === cell }"
-            :disabled="phase !== 'running' || activeCell === null || clicked"
-            @click="handleCellClick(cell)"
+        <div class="game-main">
+          <div
+            class="grid"
+            :style="{ gridTemplateColumns: `repeat(${gridSize}, minmax(56px, 70px))` }"
           >
-            {{ cell }}
-          </button>
+            <button
+              v-for="cell in cells"
+              :key="cell"
+              class="cell"
+              :class="{ active: activeCell === cell }"
+              :disabled="phase !== 'running' || activeCell === null || clicked"
+              @click="handleCellClick(cell)"
+            >
+              {{ cell }}
+            </button>
+          </div>
         </div>
-
         <div class="controls controls-centered">
           <button class="btn btn-start" :disabled="phase === 'running'" @click="start">Start</button>
           <button class="btn btn-stop" :disabled="phase !== 'running'" @click="stop">Stop</button>
@@ -644,28 +645,65 @@ button:disabled {
 
 .game-shell:fullscreen .game-shell-body {
   height: calc(100vh - 73px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 20px 24px;
+  overflow: hidden;
+  box-sizing: border-box;
+  align-items: stretch;
+}
+
+.game-shell:fullscreen .shell-top-status {
+  min-height: auto;
+  margin: 0;
+}
+
+.game-shell:fullscreen .progress {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  margin: 0;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.game-shell:fullscreen .game-main {
+  width: 100%;
+  max-width: 1100px;
+  min-height: 0;
+  overflow: auto;
+  justify-self: center;
+
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
   align-items: center;
-  overflow-y: auto;
-  padding: 24px 20px 28px;
-  gap: 10px;
+  justify-content: center;
+  gap: 14px;
+
+  padding: 6px 0;
+  box-sizing: border-box;
 }
 
-.game-shell:fullscreen .grid {
-  flex: 1;
-  align-content: center;
-}
-
-.game-shell:fullscreen .game-shell-title {
-  font-size: 26px;
+.game-shell:fullscreen .controls {
+  width: 100%;
+  max-width: 1100px;
+  justify-self: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding-top: 8px;
+  z-index: 2;
 }
 
 .game-shell:fullscreen .controls button,
 .game-shell:fullscreen .fullscreen-btn {
   font-size: 16px;
   padding: 12px 18px;
+}
+
+.game-shell:fullscreen .game-shell-title {
+  font-size: 26px;
 }
 
 .game-shell:fullscreen .floating-score {
@@ -678,11 +716,10 @@ button:disabled {
 .game-shell:fullscreen .combo-badge {
   font-size: 15px;
 }
-
 .game-shell:fullscreen .cell {
-  width: 76px;
-  height: 76px;
-  font-size: 16px;
+  width: clamp(52px, 7vh, 76px);
+  height: clamp(52px, 7vh, 76px);
+  font-size: clamp(13px, 1.8vh, 16px);
 }
 
 .module-description {

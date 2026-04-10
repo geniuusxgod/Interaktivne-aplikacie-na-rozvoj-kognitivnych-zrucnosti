@@ -51,9 +51,25 @@
       <div
         v-for="(row, index) in rows"
         :key="row.id"
-        class="leaderboard-item"
+        :class="[
+          'leaderboard-item',
+          {
+            'place-1': index === 0,
+            'place-2': index === 1,
+            'place-3': index === 2,
+          }
+        ]"
       >
-        <div class="leaderboard-rank">
+        <div
+          :class="[
+            'leaderboard-rank',
+            {
+              'rank-1': index === 0,
+              'rank-2': index === 1,
+              'rank-3': index === 2,
+            }
+          ]"
+        >
           #{{ index + 1 }}
         </div>
 
@@ -238,5 +254,44 @@ function formatMode(modeKey) {
   flex-wrap: wrap;
   color: #475569;
   font-size: 14px;
+}
+
+.leaderboard-item.place-1 {
+  background: #fff8db;
+  border-color: #f4d35e;
+}
+
+.leaderboard-item.place-2 {
+  background: #f3f4f6;
+  border-color: #cbd5e1;
+}
+
+.leaderboard-item.place-3 {
+  background: #fff1e8;
+  border-color: #d6a77a;
+}
+
+.leaderboard-rank.rank-1 {
+  color: #7c5a00;
+  background: #f4c542;
+  border-radius: 999px;
+  padding: 4px 10px;
+  text-align: center;
+}
+
+.leaderboard-rank.rank-2 {
+  color: #334155;
+  background: #cbd5e1;
+  border-radius: 999px;
+  padding: 4px 10px;
+  text-align: center;
+}
+
+.leaderboard-rank.rank-3 {
+  color: #ffffff;
+  background: #c97a40;
+  border-radius: 999px;
+  padding: 4px 10px;
+  text-align: center;
 }
 </style>

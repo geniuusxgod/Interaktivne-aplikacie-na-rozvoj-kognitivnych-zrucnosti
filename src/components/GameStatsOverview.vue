@@ -44,6 +44,11 @@
             </div>
 
             <div class="stat-row">
+              <span>Pozícia v rebríčku</span>
+              <strong>{{ formatRank(game.leaderboardRank) }}</strong>
+            </div>
+
+            <div class="stat-row">
               <span>Best score</span>
               <strong>{{ formatNumber(game.bestScore) }}</strong>
             </div>
@@ -77,6 +82,7 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { subscribeToAuth } from "../services/authService";
 import { loadMyAttempts } from "../services/historyService";
+import { loadLeaderboardRanksForUser } from "../services/leaderboardService";
 
 const user = ref(null);
 const loading = ref(false);
@@ -116,6 +122,7 @@ function buildEmptyStats() {
   return gameDefinitions.map((game) => ({
     ...game,
     totalAttempts: 0,
+    leaderboardRank: null,
     bestScore: null,
     avgScore: null,
     avgAccuracy: null,
@@ -131,44 +138,57 @@ async function fetchStats() {
   errorMessage.value = "";
 
   try {
-    const attempts = await loadMyAttempts();
+    const [attempts, leaderboardRanks] = await Promise.all([
+      loadMyAttempts(),
+      loadLeaderboardRanksForUser(
+        user.value.uid,
+        gameDefinitions.map((game) => game.key)
+      ),
+    ]);
 
-    gameStats.value = gameDefinitions.map((game) => {
-      const list = attempts.filter((attempt) => attempt.gameKey === game.key);
+    console.log("LEADERBOARD RANKS FROM SERVICE:", leaderboardRanks);
 
-      if (list.length === 0) {
-        return {
-          ...game,
-          totalAttempts: 0,
-          bestScore: null,
-          avgScore: null,
-          avgAccuracy: null,
-          avgDuration: null,
-          lastPlayedAt: null,
-        };
+    const grouped = new Map();
+
+    for (const attempt of attempts) {
+      const key = attempt.gameKey;
+      if (!key) continue;
+
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
       }
 
+      grouped.get(key).push(attempt);
+    }
+
+    gameStats.value = gameDefinitions.map((game) => {
+      const list = grouped.get(game.key) ?? [];
+
       const scores = list
-        .map((item) => Number(item.score))
+        .map((attempt) => Number(attempt.score))
         .filter((value) => Number.isFinite(value));
 
       const accuracies = list
-        .map((item) => Number(item.accuracy))
+        .map((attempt) => Number(attempt.accuracy))
         .filter((value) => Number.isFinite(value));
 
       const durations = list
-        .map((item) => Number(item.durationMs))
+        .map((attempt) => Number(attempt.durationMs))
         .filter((value) => Number.isFinite(value));
 
-      const lastPlayedAt = list.reduce((latest, item) => {
-        const currentTime = getTimestampValue(item.createdAt);
-        const latestTime = getTimestampValue(latest);
-        return currentTime > latestTime ? item.createdAt : latest;
-      }, null);
+      const sortedByDate = [...list].sort((a, b) => {
+        return getTimestampValue(b.createdAt) - getTimestampValue(a.createdAt);
+      });
+
+      const lastPlayedAt = sortedByDate[0]?.createdAt ?? null;
+      const rank = leaderboardRanks?.[game.key] ?? null;
+
+      console.log("CARD:", game.key, "RANK:", rank);
 
       return {
         ...game,
         totalAttempts: list.length,
+        leaderboardRank: rank,
         bestScore: scores.length ? Math.max(...scores) : null,
         avgScore: scores.length ? average(scores) : null,
         avgAccuracy: accuracies.length ? average(accuracies) : null,
@@ -185,15 +205,22 @@ async function fetchStats() {
   }
 }
 
+function formatRank(value) {
+  if (value === null || value === undefined) return "—";
+  return `#${value}`;
+}
+
 function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function getTimestampValue(timestamp) {
   if (!timestamp) return 0;
+
   if (typeof timestamp.toDate === "function") {
     return timestamp.toDate().getTime();
   }
+
   return new Date(timestamp).getTime();
 }
 
@@ -252,6 +279,11 @@ function formatDate(timestamp) {
   border: 1px solid #cbd5e1;
   background: white;
   cursor: pointer;
+}
+
+.stats-header button:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 .stats-empty {
